@@ -1,11 +1,22 @@
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::{Arc, Mutex};
 use std::thread;
+
+mod resp;
+use resp::parse_resp;
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    println!("Redis clone listening on 127.0.0.1:63 79");
+
+    // Shared, thread-safe in-memory key-value store
+    let db = Arc::new(Mutex::new(HashMap::new()));
 
     for stream in listener.incoming() {
+        let db = Arc::clone(&db);
+
         match stream {
             Ok(mut stream) => {
                 thread::spawn(move || {
@@ -19,24 +30,52 @@ fn main() {
                         };
 
                         let input = String::from_utf8_lossy(&buf[..read_count]);
-                        let parts = parse_resp(&input);
+                        let args = parse_resp(&input);
 
-                        if parts.is_empty() {
-                            let _ = stream.write_all(b"-ERR empty command\r\n");
+                        if args.is_empty() {
+                            let _ = stream.write_all(b"-ERR empty or invalid command\r\n");
                             continue;
                         }
 
-                        match parts[0].to_uppercase().as_str() {
+                        match args[0].to_uppercase().as_str() {
                             "PING" => {
                                 let _ = stream.write_all(b"+PONG\r\n");
                             }
                             "ECHO" => {
-                                if parts.len() < 2 {
-                                    let _ = stream.write_all(b"-ERR wrong number of arguments for 'echo'\r\n");
+                                if args.len() < 2 {
+                                    let _ = stream.write_all(b"-ERR missing argument for ECHO\r\n");
                                 } else {
-                                    let msg = &parts[1];
-                                    let resp = format!("${}\r\n{}\r\n", msg.len(), msg);
-                                    let _ = stream.write_all(resp.as_bytes());
+                                    let msg = &args[1];
+                                    let response = format!("${}\r\n{}\r\n", msg.len(), msg);
+                                    let _ = stream.write_all(response.as_bytes());
+                                }
+                            }
+                            "SET" => {
+                                if args.len() != 3 {
+                                    let _ = stream.write_all(b"-ERR wrong number of arguments for 'SET'\r\n");
+                                } else {
+                                    let key = &args[1];
+                                    let value = &args[2];
+
+                                    let mut store = db.lock().unwrap();
+                                    store.insert(key.clone(), value.clone());
+
+                                    let _ = stream.write_all(b"+OK\r\n");
+                                }
+                            }
+                            "GET" => {
+                                if args.len() != 2 {
+                                    let _ = stream.write_all(b"-ERR wrong number of arguments for 'GET'\r\n");
+                                } else {
+                                    let key = &args[1];
+
+                                    let store = db.lock().unwrap();
+                                    if let Some(value) = store.get(key) {
+                                        let response = format!("${}\r\n{}\r\n", value.len(), value);
+                                        let _ = stream.write_all(response.as_bytes());
+                                    } else {
+                                        let _ = stream.write_all(b"$-1\r\n"); // Null bulk string
+                                    }
                                 }
                             }
                             _ => {
@@ -51,25 +90,4 @@ fn main() {
             }
         }
     }
-}
-
-fn parse_resp(input: &str) -> Vec<String> {
-    let mut lines = input.lines();
-    let mut result = Vec::new();
-
-    if let Some(first) = lines.next() {
-        if !first.starts_with('*') {
-            return vec![];
-        }
-    }
-
-    while let Some(line) = lines.next() {
-        if line.starts_with('$') {
-            if let Some(val) = lines.next() {
-                result.push(val.to_string());
-            }
-        }
-    }
-
-    result
 }
