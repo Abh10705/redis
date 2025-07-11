@@ -1,43 +1,75 @@
-#![allow(unused_imports)]
-use std::io::Read;
-use std::io::Write;
-use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-//use std::net::TcpListener;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::thread;
 
-#[tokio::main]
-async fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
+fn main() {
+    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
-    // Uncomment this block to pass the first stage
-    //
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
-    
-    loop {
-        
-        let stream = listener.accept().await; 
+    for stream in listener.incoming() {
         match stream {
-           
-            Ok((mut stream,_)) => {
-                println!("accepted new connection plz, handle it plzzz !");
-                
-                tokio::spawn(async move {
-               
-                let mut buf = [0; 512];
-                loop {
-                    let read_count = stream.read(&mut buf).await.unwrap();
-                    if read_count == 0 {
-                        break;
+            Ok(mut stream) => {
+                thread::spawn(move || {
+                    let mut buf = [0; 512];
+
+                    loop {
+                        let read_count = match stream.read(&mut buf) {
+                            Ok(0) => break,
+                            Ok(n) => n,
+                            Err(_) => break,
+                        };
+
+                        let input = String::from_utf8_lossy(&buf[..read_count]);
+                        let parts = parse_resp(&input);
+
+                        if parts.is_empty() {
+                            let _ = stream.write_all(b"-ERR empty command\r\n");
+                            continue;
+                        }
+
+                        match parts[0].to_uppercase().as_str() {
+                            "PING" => {
+                                let _ = stream.write_all(b"+PONG\r\n");
+                            }
+                            "ECHO" => {
+                                if parts.len() < 2 {
+                                    let _ = stream.write_all(b"-ERR wrong number of arguments for 'echo'\r\n");
+                                } else {
+                                    let msg = &parts[1];
+                                    let resp = format!("${}\r\n{}\r\n", msg.len(), msg);
+                                    let _ = stream.write_all(resp.as_bytes());
+                                }
+                            }
+                            _ => {
+                                let _ = stream.write_all(b"-ERR unknown command\r\n");
+                            }
+                        }
                     }
-                
-                    stream.write(b"+PONG\r\n").await.unwrap();
-                }       
-            });
-            } 
+                });
+            }
             Err(e) => {
-                println!("error: {}", e);
-             }
+                eprintln!("Connection error: {}", e);
+            }
         }
     }
+}
+
+fn parse_resp(input: &str) -> Vec<String> {
+    let mut lines = input.lines();
+    let mut result = Vec::new();
+
+    if let Some(first) = lines.next() {
+        if !first.starts_with('*') {
+            return vec![];
+        }
+    }
+
+    while let Some(line) = lines.next() {
+        if line.starts_with('$') {
+            if let Some(val) = lines.next() {
+                result.push(val.to_string());
+            }
+        }
+    }
+
+    result
 }
