@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::env;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -8,16 +9,51 @@ use std::time::{Duration, Instant};
 mod resp;
 use resp::parse_resp;
 
-fn main() {
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
-    println!("Redis clone listening on 127.0.0.1:6379");
+struct Config {
+    dir: String,
+    dbfilename: String,
+}
 
-    // Database: key -> (value, optional expiry time)
+fn main() {
+    // Parse command-line arguments
+    let args: Vec<String> = env::args().collect();
+    let mut dir = String::from("/tmp");
+    let mut dbfilename = String::from("dump.rdb");
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--dir" => {
+                if i + 1 < args.len() {
+                    dir = args[i + 1].clone();
+                    i += 1;
+                }
+            }
+            "--dbfilename" => {
+                if i + 1 < args.len() {
+                    dbfilename = args[i + 1].clone();
+                    i += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    println!("dir = {}", dir);
+    println!("dbfilename = {}", dbfilename);
+
+    let config = Arc::new(Config { dir, dbfilename });
+
+    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
+    println!("Listening on 127.0.0.1:6379");
+
     let db: Arc<Mutex<HashMap<String, (String, Option<Instant>)>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
     for stream in listener.incoming() {
         let db = Arc::clone(&db);
+        let config = Arc::clone(&config);
 
         match stream {
             Ok(mut stream) => {
@@ -26,7 +62,7 @@ fn main() {
 
                     loop {
                         let read_count = match stream.read(&mut buf) {
-                            Ok(0) => break, // connection closed
+                            Ok(0) => break,
                             Ok(n) => n,
                             Err(_) => break,
                         };
@@ -104,6 +140,35 @@ fn main() {
                                     } else {
                                         let _ = stream.write_all(b"$-1\r\n");
                                     }
+                                }
+                            }
+
+                            "CONFIG" => {
+                                if args.len() == 3 && args[1].to_uppercase() == "GET" {
+                                    let x = args[2].to_lowercase();
+                                    match x.as_str() {
+                                        "dir" => {
+                                            let response = format!(
+                                                "*2\r\n$3\r\ndir\r\n${}\r\n{}\r\n",
+                                                config.dir.len(),
+                                                config.dir
+                                            );
+                                            let _ = stream.write_all(response.as_bytes());
+                                        }
+                                        "dbfilename" => {
+                                            let response = format!(
+                                                "*2\r\n$9\r\ndbfilename\r\n${}\r\n{}\r\n",
+                                                config.dbfilename.len(),
+                                                config.dbfilename
+                                            );
+                                            let _ = stream.write_all(response.as_bytes());
+                                        }
+                                        _ => {
+                                            let _ = stream.write_all(b"-ERR unknown parameter\r\n");
+                                        }
+                                    }
+                                } else {
+                                    let _ = stream.write_all(b"-ERR syntax error\r\n");
                                 }
                             }
 
