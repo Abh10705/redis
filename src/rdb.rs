@@ -24,6 +24,16 @@ pub fn load_keys_from_rdb(path: &Path) -> Result<Vec<String>, String> {
                 i += skip + val_len;
             }
 
+             0xFB => { // Signals hash table size information
+            i += 1; // Skip the 0xFB byte
+            // Read and skip the hash table size
+            let (_, skip) = decode_length(&buffer[i..])?;
+            i += skip;
+            // Read and skip the expiry hash table size
+            let (_, skip) = decode_length(&buffer[i..])?;
+            i += skip;
+           }
+
             0xFE => {
                 // Database selector - skip DB index
                 i += 1;
