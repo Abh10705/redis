@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
@@ -88,12 +89,13 @@ fn decode_string(buf: &[u8]) -> Result<(String, usize), String> {
     }
 }
 
-/// Load keys from an RDB file.
-pub fn load_keys_from_rdb(path: &Path) -> Result<Vec<String>, String> {
+/// Load key-value pairs from an RDB file.
+pub fn load_db_from_rdb(path: &Path) -> Result<HashMap<String, String>, String> {
     let mut file = match File::open(path) {
         Ok(f) => f,
-        Err(_) => return Ok(vec![]), // If file doesn't exist, return empty DB
+        Err(_) => return Ok(HashMap::new()), // If file doesn't exist, return empty DB
     };
+    // **FIX 1:** The buffer must be a Vec<u8> to hold the file bytes.
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)
         .map_err(|_| "Failed to read RDB file")?;
@@ -103,7 +105,7 @@ pub fn load_keys_from_rdb(path: &Path) -> Result<Vec<String>, String> {
     }
 
     let mut i = 9; // Skip the header
-    let mut keys = Vec::new();
+    let mut data = HashMap::new();
 
     while i < buffer.len() {
         let byte = buffer[i];
@@ -143,11 +145,14 @@ pub fn load_keys_from_rdb(path: &Path) -> Result<Vec<String>, String> {
                 i += 1; // Skip value type byte (0x00)
 
                 let (key, key_bytes_consumed) = decode_string(&buffer[i..])?;
-                keys.push(key);
                 i += key_bytes_consumed;
 
-                let (_value, value_bytes_consumed) = decode_string(&buffer[i..])?;
+                // **FIX 2:** Get the value instead of discarding it with _.
+                let (value, value_bytes_consumed) = decode_string(&buffer[i..])?;
                 i += value_bytes_consumed;
+
+                // **FIX 3:** Insert the key and value into the `data` HashMap.
+                data.insert(key, value);
             }
             0xFF => break, // End of file
             _ => {
@@ -158,5 +163,6 @@ pub fn load_keys_from_rdb(path: &Path) -> Result<Vec<String>, String> {
             }
         }
     }
-    Ok(keys)
+    // **FIX 4:** Return the `data` HashMap, not a non-existent `keys` variable.
+    Ok(data)
 }

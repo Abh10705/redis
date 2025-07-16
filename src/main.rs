@@ -12,7 +12,7 @@ use std::{
 
 use db::InMemoryDB;
 use handler::handle_client;
-use rdb::load_keys_from_rdb;
+use rdb::load_db_from_rdb;
 
 pub struct Config {
     dir: String,
@@ -55,13 +55,13 @@ fn main() {
 
     // --- 3. Load Data from RDB File ---
     let rdb_path = Path::new(&dir).join(&dbfilename);
-    match load_keys_from_rdb(&rdb_path) {
-        Ok(keys) => {
-            if !keys.is_empty() {
-                println!("Loaded {} keys from RDB file.", keys.len());
+    match load_db_from_rdb(&rdb_path) {
+        Ok(data) => {
+            if !data.is_empty() {
+                println!("Loaded {} keyys from RDB file.", data.len());
                 let mut db_locked = db.lock().unwrap();
-                for key in keys {
-                    db_locked.set(key, "(loaded-from-rdb)".to_string());
+                for (key,value) in data{
+                    db_locked.set(key, value);
                 }
             }
         }
