@@ -42,13 +42,24 @@ fn main() {
     let db = Arc::new(Mutex::new(InMemoryDB::new()));
 
     // Load keys from RDB if file exists
-    let rdb_path = Path::new(&dir).join(&dbfilename);
-    if let Ok(keys) = load_keys_from_rdb(&rdb_path) {
-        let mut db_locked = db.lock().unwrap();
-        for key in keys {
-            db_locked.set(key, "(loaded-from-rdb)".to_string());
+        // In main.rs
+// Load keys from RDB if file exists
+let rdb_path = Path::new(&dir).join(&dbfilename);
+match load_keys_from_rdb(&rdb_path) {
+    Ok(keys) => {
+        if !keys.is_empty() {
+            println!("Loaded {} keys from RDB file.", keys.len());
+            let mut db_locked = db.lock().unwrap();
+            for key in keys {
+                db_locked.set(key, "(loaded-from-rdb)".to_string());
+            }
         }
     }
+    Err(e) => {
+        // THIS IS THE IMPORTANT PART
+        eprintln!("Error loading RDB file: {}", e);
+    }
+}
 
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
     println!("Listening on port 6379");
