@@ -1,11 +1,12 @@
-    use std::net::TcpStream;
+use std::net::TcpStream;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
-
+use crate::Config;
 use crate::resp::*;
 use crate::db::InMemoryDB;
 
-pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>) {
+
+pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: Arc<Config>) {
     let mut buffer = [0; 512];
 
     loop {
@@ -66,6 +67,24 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>) {
                     }
                 }
             }
+            "CONFIG" => {
+        if args.len() < 3 || args[1].to_uppercase() != "GET" {
+            encode_error("Only CONFIG GET is supported")
+        } else {
+            let key = &args[2];
+            match key.as_str() {
+                "dir" => {
+                    let items = vec!["dir".to_string(), config.dir.clone()];
+                    encode_array(&items)
+                }
+                "dbfilename" => {
+                    let items = vec!["dbfilename".to_string(), config.dbfilename.clone()];
+                    encode_array(&items)
+                }
+                _ => encode_error("Unknown CONFIG key")
+            }
+        }
+    }
 
             "KEYS" => {
                 if args.len() == 2 && args[1] == "*" {
