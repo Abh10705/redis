@@ -1,18 +1,16 @@
-mod resp;
 mod db;
-mod rdb;
 mod handler;
-
-use std::{
-    env,
-    net::TcpListener,
-    path::Path,
-    sync::{Arc, Mutex},
-};
+mod rdb;
+mod resp;
 
 use db::InMemoryDB;
 use handler::handle_client;
-use rdb::load_db_from_rdb;
+use rdb::{load_db_from_rdb, RdbEntry}; // Import RdbEntry
+use std::collections::HashMap;
+use std::env;
+use std::net::TcpListener;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 pub struct Config {
     dir: String,
@@ -20,7 +18,6 @@ pub struct Config {
 }
 
 fn main() {
-    // --- 1. Parse Command-Line Arguments ---
     let args: Vec<String> = env::args().collect();
     let mut dir = ".".to_string();
     let mut dbfilename = "dump.rdb".to_string();
@@ -45,7 +42,6 @@ fn main() {
         i += 1;
     }
 
-    // --- 2. Initialize Shared State (Config & DB) ---
     let config = Arc::new(Config {
         dir: dir.clone(),
         dbfilename: dbfilename.clone(),
@@ -53,15 +49,19 @@ fn main() {
 
     let db = Arc::new(Mutex::new(InMemoryDB::new()));
 
-    // --- 3. Load Data from RDB File ---
     let rdb_path = Path::new(&dir).join(&dbfilename);
     match load_db_from_rdb(&rdb_path) {
         Ok(data) => {
             if !data.is_empty() {
-                println!("Loaded {} keyys from RDB file.", data.len());
+                println!("Loaded {} keys from RDB file.", data.len());
                 let mut db_locked = db.lock().unwrap();
-                for (key,value) in data{
-                    db_locked.set(key, value);
+                // This loop is now corrected to handle the RdbEntry struct
+                for (key, entry) in data {
+                    if let Some(expiry_ms) = entry.expiry_ms {
+                        db_locked.set_with_absolute_expiry(key, entry.value, expiry_ms);
+                    } else {
+                        db_locked.set(key, entry.value);
+                    }
                 }
             }
         }
@@ -70,7 +70,6 @@ fn main() {
         }
     }
 
-    // --- 4. Start TCP Listener and Handle Connections ---
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
     println!("Listening on port 6379");
 
