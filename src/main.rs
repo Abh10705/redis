@@ -49,13 +49,15 @@ fn main() {
 
     let db = Arc::new(Mutex::new(InMemoryDB::new()));
 
+    
+    // In main.rs
+
     let rdb_path = Path::new(&dir).join(&dbfilename);
     match load_db_from_rdb(&rdb_path) {
         Ok(data) => {
             if !data.is_empty() {
                 println!("Loaded {} keys from RDB file.", data.len());
                 let mut db_locked = db.lock().unwrap();
-                // This loop is now corrected to handle the RdbEntry struct
                 for (key, entry) in data {
                     if let Some(expiry_ms) = entry.expiry_ms {
                         db_locked.set_with_absolute_expiry(key, entry.value, expiry_ms);
@@ -67,9 +69,12 @@ fn main() {
         }
         Err(e) => {
             eprintln!("Error loading RDB file: {}", e);
+            // **ADD THIS LINE:**
+            std::process::exit(1);
         }
     }
 
+// ... rest of the main function
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
     println!("Listening on port 6379");
 
