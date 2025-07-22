@@ -37,6 +37,12 @@ pub fn encode_array(items: &[String]) -> String {
     result
 }
 
+// In src/resp.rs
+
+pub fn encode_integer(n: i64) -> String {
+    format!(":{}\r\n", n)
+}
+
 pub fn encode_error(msg: &str) -> String {
     format!("-ERR {}\r\n", msg)
 }

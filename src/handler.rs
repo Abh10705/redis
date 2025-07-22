@@ -85,7 +85,16 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
             }
         }
     }
-
+            "RPUSH" => {
+                    if args.len() < 3 {
+                        encode_error("RPUSH needs key and at least one value")
+                    } else {
+                        let key = args[1].clone();
+                        let element = args[2].clone();
+                        let list_len = db.rpush(key, element);
+                        encode_integer(list_len as i64)
+                    }
+                }
             "KEYS" => {
                 if args.len() == 2 && args[1] == "*" {
                     let keys = db.keys();
