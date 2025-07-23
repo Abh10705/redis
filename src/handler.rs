@@ -90,6 +90,25 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
                     encode_error("Only KEYS * is supported")
                 }
             }
+           // In src/handler.rs, inside the `handle_client` function's loop
+
+// ... inside the `let response = match ...` block
+
+    // ADD THIS NEW MATCH ARM (usually placed before RPUSH)
+            "LPUSH" => {
+                if args.len() < 3 {
+                    encode_error("wrong number of arguments for 'lpush' command")
+                } else {
+                    let key = args[1].clone();
+                    let elements: Vec<String> = args[2..].to_vec();
+                    match db.lpush(key, elements) {
+                        Ok(list_len) => encode_integer(list_len as i64),
+                        Err(msg) => encode_error(msg),
+                    }
+                }
+            }
+
+           
             "RPUSH" => {
                 if args.len() < 3 {
                     encode_error("wrong number of arguments for 'rpush' command")

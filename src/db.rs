@@ -17,6 +17,7 @@ pub struct InMemoryDB {
     map: HashMap<String, Entry>,
 }
 
+// **THE FIX:** Ensure all functions are inside this `impl` block
 impl InMemoryDB {
     pub fn new() -> Self {
         Self { map: HashMap::new() }
@@ -71,7 +72,6 @@ impl InMemoryDB {
         }
     }
 
-
     pub fn lrange(&mut self, key: &str, start: isize, stop: isize) -> Result<Vec<String>, &'static str> {
         if let Some(entry) = self.map.get_mut(key) {
             if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
@@ -81,21 +81,16 @@ impl InMemoryDB {
 
             if let RedisValue::List(list) = &entry.value {
                 let len = list.len() as isize;
-
-                // **NEW:** Convert start and stop indexes
                 let mut start = if start < 0 { len + start } else { start };
                 let mut stop = if stop < 0 { len + stop } else { stop };
                 
-                // Clamp to bounds (if negative index was too large, it becomes 0)
                 start = std::cmp::max(0, start);
                 stop = std::cmp::max(0, stop);
 
-                // Handle edge cases with the now-positive indexes
                 if start >= len || start > stop {
                     return Ok(vec![]);
                 }
 
-                // Adjust stop index and slice
                 let end = std::cmp::min(stop as usize, list.len() - 1);
                 Ok(list[start as usize..=end].to_vec())
 
@@ -106,5 +101,20 @@ impl InMemoryDB {
             Ok(vec![])
         }
     }
+
+    pub fn lpush(&mut self, key: String, elements: Vec<String>) -> Result<usize, &'static str> {
+        let entry = self.map.entry(key).or_insert_with(|| Entry {
+            value: RedisValue::List(Vec::new()),
+            expires_at: None,
+        });
+
+        if let RedisValue::List(list) = &mut entry.value {
+            for element in elements {
+                list.insert(0, element);
+            }
+            Ok(list.len())
+        } else {
+            Err("WRONGTYPE Operation against a key holding the wrong kind of value")
+        }
+    }
 }
-    // In src/db.rs, inside `impl InMemoryDB
