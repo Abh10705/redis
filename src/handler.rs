@@ -91,8 +91,10 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
                     } else {
                         let key = args[1].clone();
                         let element = args[2].clone();
-                        let list_len = db.rpush(key, element);
-                        encode_integer(list_len as i64)
+                        match db.rpush(key, element) {  
+                            Ok(list_len) => encode_integer(list_len as i64),
+                            Err(msg) => encode_error(msg),
+                        }
                     }
                 }
             "KEYS" => {
