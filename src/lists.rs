@@ -104,4 +104,33 @@ impl InMemoryDB {
             Ok(vec![])
         }
     }
+// In src/db.rs
+
+// Add this new method inside `impl InMemoryDB`
+    pub fn lpop_count(&mut self, key: &str, count: usize) -> Result<Vec<String>, &'static str> {
+        if let Some(entry) = self.map.get_mut(key) {
+            if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
+                self.map.remove(key);
+                return Ok(vec![]);
+            }
+
+            if let RedisValue::List(list) = &mut entry.value {
+                // Determine how many elements to pop (can't be more than the list length)
+                let num_to_pop = std::cmp::min(count, list.len());
+                // Efficiently remove the first `num_to_pop` elements
+                let popped_elements: Vec<String> = list.drain(0..num_to_pop).collect();
+                
+                if list.is_empty() {
+                    self.map.remove(key);
+                }
+                Ok(popped_elements)
+            } else {
+                Err("WRONGTYPE Operation against a key holding the wrong kind of value")
+            }
+        } else {
+            // Key does not exist, return an empty array
+            Ok(vec![])
+        }
+    }
+
 }

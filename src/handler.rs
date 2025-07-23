@@ -135,19 +135,32 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
                 }
             }
 
-        
+        // In src/handler.rs
+
             "LPOP" => {
-                if args.len() != 2 {
+                if args.len() < 2 || args.len() > 3 {
                     encode_error("wrong number of arguments for 'lpop' command")
-                } else {
+                } else if args.len() == 2 {
+                    // This is the original LPOP behavior for a single element
                     let key = &args[1];
                     match db.lpop(key) {
                         Ok(Some(element)) => encode_bulk_string(&element),
                         Ok(None) => encode_null_bulk_string(),
                         Err(msg) => encode_error(msg),
                     }
+                } else {
+                    // This is the new behavior for `LPOP key count`
+                    let key = &args[1];
+                    match args[2].parse::<usize>() {
+                        Ok(count) => match db.lpop_count(key, count) {
+                            Ok(elements) => encode_array(&elements),
+                            Err(msg) => encode_error(msg),
+                        },
+                        Err(_) => encode_error("value is not an integer or out of range"),
+                    }
                 }
             }
+
 
             "LRANGE" => {
                 if args.len() != 4 {
