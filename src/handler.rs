@@ -1,7 +1,7 @@
 use crate::db::InMemoryDB;
 use crate::resp::*;
 use crate::Config;
-use crate::rdb::RdbEntry; // **FIX 1:** Correctly import RdbEntry from the rdb module.
+use crate::rdb::RdbEntry; //
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
@@ -102,13 +102,16 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
                     }
                 }
             }
+            // In src/handler.rs
+
             "LRANGE" => {
                 if args.len() != 4 {
                     encode_error("wrong number of arguments for 'lrange' command")
                 } else {
                     let key = &args[1];
-                    let start_res = args[2].parse::<usize>();
-                    let stop_res = args[3].parse::<usize>();
+                    // **MODIFIED:** Parse as `isize` to allow negative numbers.
+                    let start_res = args[2].parse::<isize>();
+                    let stop_res = args[3].parse::<isize>();
 
                     if start_res.is_err() || stop_res.is_err() {
                         encode_error("value is not an integer or out of range")

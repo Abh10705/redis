@@ -71,7 +71,8 @@ impl InMemoryDB {
         }
     }
 
-    pub fn lrange(&mut self, key: &str, start: usize, stop: usize) -> Result<Vec<String>, &'static str> {
+
+    pub fn lrange(&mut self, key: &str, start: isize, stop: isize) -> Result<Vec<String>, &'static str> {
         if let Some(entry) = self.map.get_mut(key) {
             if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
                 self.map.remove(key);
@@ -79,11 +80,25 @@ impl InMemoryDB {
             }
 
             if let RedisValue::List(list) = &entry.value {
-                if start >= list.len() || start > stop {
+                let len = list.len() as isize;
+
+                // **NEW:** Convert start and stop indexes
+                let mut start = if start < 0 { len + start } else { start };
+                let mut stop = if stop < 0 { len + stop } else { stop };
+                
+                // Clamp to bounds (if negative index was too large, it becomes 0)
+                start = std::cmp::max(0, start);
+                stop = std::cmp::max(0, stop);
+
+                // Handle edge cases with the now-positive indexes
+                if start >= len || start > stop {
                     return Ok(vec![]);
                 }
-                let end = std::cmp::min(stop, list.len() - 1);
-                Ok(list[start..=end].to_vec())
+
+                // Adjust stop index and slice
+                let end = std::cmp::min(stop as usize, list.len() - 1);
+                Ok(list[start as usize..=end].to_vec())
+
             } else {
                 Err("WRONGTYPE Operation against a key holding the wrong kind of value")
             }
@@ -92,3 +107,4 @@ impl InMemoryDB {
         }
     }
 }
+    // In src/db.rs, inside `impl InMemoryDB
