@@ -2,21 +2,25 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
-enum RedisValue {
+pub enum RedisValue {
     String(String),
     List(Vec<String>),
 }
 
 #[derive(Clone)]
-struct Entry {
-    value: RedisValue,
-    expires_at: Option<Instant>,
+pub struct Entry {
+    pub value: RedisValue,
+    pub expires_at: Option<Instant>,
 }
 
+// **FIX 1:** Make the struct itself public.
 pub struct InMemoryDB {
-    map: HashMap<String, Entry>,
+    // **FIX 2:** Make the `map` field public *within the crate*.
+    // This allows our `lists.rs` module to access it.
+    pub(crate) map: HashMap<String, Entry>,
 }
 
+// This block now only contains the CORE, non-list methods.
 impl InMemoryDB {
     pub fn new() -> Self {
         Self { map: HashMap::new() }
@@ -55,82 +59,5 @@ impl InMemoryDB {
     pub fn keys(&mut self) -> Vec<String> {
         self.map.retain(|_, v| v.expires_at.map_or(true, |t| t > Instant::now()));
         self.map.keys().cloned().collect()
-    }
-
-    pub fn rpush(&mut self, key: String, elements: Vec<String>) -> Result<usize, &'static str> {
-        let entry = self.map.entry(key).or_insert_with(|| Entry {
-            value: RedisValue::List(Vec::new()),
-            expires_at: None,
-        });
-
-        if let RedisValue::List(list) = &mut entry.value {
-            list.extend(elements);
-            Ok(list.len())
-        } else {
-            Err("WRONGTYPE Operation against a key holding the wrong kind of value")
-        }
-    }
-
-    pub fn lrange(&mut self, key: &str, start: isize, stop: isize) -> Result<Vec<String>, &'static str> {
-        if let Some(entry) = self.map.get_mut(key) {
-            if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
-                self.map.remove(key);
-                return Ok(vec![]);
-            }
-
-            if let RedisValue::List(list) = &entry.value {
-                let len = list.len() as isize;
-                let mut start = if start < 0 { len + start } else { start };
-                let mut stop = if stop < 0 { len + stop } else { stop };
-                
-                start = std::cmp::max(0, start);
-                stop = std::cmp::max(0, stop);
-
-                if start >= len || start > stop {
-                    return Ok(vec![]);
-                }
-
-                let end = std::cmp::min(stop as usize, list.len() - 1);
-                Ok(list[start as usize..=end].to_vec())
-
-            } else {
-                Err("WRONGTYPE Operation against a key holding the wrong kind of value")
-            }
-        } else {
-            Ok(vec![])
-        }
-    }
-
-    pub fn lpush(&mut self, key: String, elements: Vec<String>) -> Result<usize, &'static str> {
-        let entry = self.map.entry(key).or_insert_with(|| Entry {
-            value: RedisValue::List(Vec::new()),
-            expires_at: None,
-        });
-
-        if let RedisValue::List(list) = &mut entry.value {
-            for element in elements {
-                list.insert(0, element);
-            }
-            Ok(list.len())
-        } else {
-            Err("WRONGTYPE Operation against a key holding the wrong kind of value")
-        }
-    }
-    
-    // **THE FIX:** `llen` is now correctly placed inside the `impl` block.
-    pub fn llen(&mut self, key: &str) -> Result<usize, &'static str> {
-        if let Some(entry) = self.map.get_mut(key) {
-            if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
-                self.map.remove(key);
-                return Ok(0);
-            }
-
-            match &entry.value {
-                RedisValue::List(list) => Ok(list.len()),
-                _ => Err("WRONGTYPE Operation against a key holding the wrong kind of value"),
-            }
-        } else {
-            Ok(0)
-        }
     }
 }

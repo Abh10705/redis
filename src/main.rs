@@ -2,6 +2,7 @@ mod db;
 mod handler;
 mod rdb;
 mod resp;
+mod lists;
 
 use db::InMemoryDB;
 use handler::handle_client;
