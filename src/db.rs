@@ -61,21 +61,17 @@ impl InMemoryDB {
         self.map.keys().cloned().collect()
     }
 
-    // **MODIFIED:** The rpush method is now much smarter.
-    pub fn rpush(&mut self, key: String, element: String) -> Result<usize, &'static str> {
-        // Find the entry for the key. If it doesn't exist, create a new empty list.
-        let entry = self.map.entry(key).or_insert_with(|| Entry {
-            value: RedisValue::List(Vec::new()),
-            expires_at: None,
-        });
+    pub fn rpush(&mut self, key: String, elements: Vec<String>) -> Result<usize, &'static str> {
+    let entry = self.map.entry(key).or_insert_with(|| Entry {
+        value: RedisValue::List(Vec::new()),
+        expires_at: None,
+    });
 
-        // Now, check if the value is actually a list.
-        if let RedisValue::List(list) = &mut entry.value {
-            list.push(element);
-            Ok(list.len())
-        } else {
-            // The key exists but holds a String, not a List.
-            Err("WRONGTYPE Operation against a key holding the wrong kind of value")
-        }
+    if let RedisValue::List(list) = &mut entry.value {
+        // Use extend to add all elements from the input vector.
+        list.extend(elements);
+        Ok(list.len())
+    } else {
+        Err("WRONGTYPE Operation against a key holding the wrong kind of value")
     }
-}
+}}

@@ -90,8 +90,8 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
                         encode_error("RPUSH needs key and at least one value")
                     } else {
                         let key = args[1].clone();
-                        let element = args[2].clone();
-                        match db.rpush(key, element) {    // handling appenidng to a list
+                        let elements: Vec<String> = args[2..].to_vec();
+                        match db.rpush(key, elements) {    // handling appenidng to a list
                             Ok(list_len) => encode_integer(list_len as i64),
                             Err(msg) => encode_error(msg),
                         }
