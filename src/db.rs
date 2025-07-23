@@ -22,7 +22,6 @@ impl InMemoryDB {
         Self { map: HashMap::new() }
     }
 
-    // `set`, `set_with_expiry`, and `set_with_absolute_expiry` are unchanged.
     pub fn set(&mut self, key: String, value: String) {
         let entry = Entry { value: RedisValue::String(value), expires_at: None };
         self.map.insert(key, entry);
@@ -40,14 +39,11 @@ impl InMemoryDB {
         self.map.insert(key, entry);
     }
     
-    // `get` and `keys` are also unchanged.
     pub fn get(&mut self, key: &str) -> Option<String> {
         if let Some(entry) = self.map.get_mut(key) {
-            if let Some(expiry) = entry.expires_at {
-                if expiry <= Instant::now() {
-                    self.map.remove(key);
-                    return None;
-                }
+            if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
+                self.map.remove(key);
+                return None;
             }
             if let RedisValue::String(s) = &entry.value {
                 return Some(s.clone());
@@ -62,16 +58,37 @@ impl InMemoryDB {
     }
 
     pub fn rpush(&mut self, key: String, elements: Vec<String>) -> Result<usize, &'static str> {
-    let entry = self.map.entry(key).or_insert_with(|| Entry {
-        value: RedisValue::List(Vec::new()),
-        expires_at: None,
-    });
+        let entry = self.map.entry(key).or_insert_with(|| Entry {
+            value: RedisValue::List(Vec::new()),
+            expires_at: None,
+        });
 
-    if let RedisValue::List(list) = &mut entry.value {
-        // Use extend to add all elements from the input vector.
-        list.extend(elements);
-        Ok(list.len())
-    } else {
-        Err("WRONGTYPE Operation against a key holding the wrong kind of value")
+        if let RedisValue::List(list) = &mut entry.value {
+            list.extend(elements);
+            Ok(list.len())
+        } else {
+            Err("WRONGTYPE Operation against a key holding the wrong kind of value")
+        }
     }
-}}
+
+    pub fn lrange(&mut self, key: &str, start: usize, stop: usize) -> Result<Vec<String>, &'static str> {
+        if let Some(entry) = self.map.get_mut(key) {
+            if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
+                self.map.remove(key);
+                return Ok(vec![]);
+            }
+
+            if let RedisValue::List(list) = &entry.value {
+                if start >= list.len() || start > stop {
+                    return Ok(vec![]);
+                }
+                let end = std::cmp::min(stop, list.len() - 1);
+                Ok(list[start..=end].to_vec())
+            } else {
+                Err("WRONGTYPE Operation against a key holding the wrong kind of value")
+            }
+        } else {
+            Ok(vec![])
+        }
+    }
+}

@@ -1,17 +1,17 @@
-use std::net::TcpStream;
-use std::io::{Read, Write};
-use std::sync::{Arc, Mutex};
-use crate::Config;
-use crate::resp::*;
 use crate::db::InMemoryDB;
-
+use crate::resp::*;
+use crate::Config;
+use crate::rdb::RdbEntry; // **FIX 1:** Correctly import RdbEntry from the rdb module.
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
 
 pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: Arc<Config>) {
     let mut buffer = [0; 512];
 
     loop {
         let n = match stream.read(&mut buffer) {
-            Ok(0) => return, // client disconnected
+            Ok(0) => return,
             Ok(n) => n,
             Err(_) => return,
         };
@@ -24,12 +24,10 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
         }
 
         let cmd = args[0].to_uppercase();
-
         let mut db = db.lock().unwrap();
 
         let response = match cmd.as_str() {
             "PING" => encode_simple_string("PONG"),
-
             "ECHO" => {
                 if args.len() >= 2 {
                     encode_bulk_string(&args[1])
@@ -37,29 +35,32 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
                     encode_error("ECHO needs one argument")
                 }
             }
-
+            // **FIX 2:** Rewritten SET logic to correctly handle all cases.
             "SET" => {
                 if args.len() < 3 {
-                    encode_error("SET needs key and value")
+                    encode_error("wrong number of arguments for 'set' command")
+                } else if args.len() >= 5 && args[3].to_uppercase() == "PX" {
+                    let key = args[1].clone();
+                    let value = args[2].clone();
+                    match args[4].parse::<u64>() {
+                        Ok(ms) => {
+                            db.set_with_expiry(key, value, ms);
+                            encode_simple_string("OK")
+                        }
+                        Err(_) => {
+                            encode_error("value is not an integer or out of range")
+                        }
+                    }
                 } else {
                     let key = args[1].clone();
                     let value = args[2].clone();
-                    if args.len() >= 5 && args[3].to_uppercase() == "PX" {
-                        if let Ok(ms) = args[4].parse::<u64>() {
-                            db.set_with_expiry(key, value, ms);
-                        } else {
-                            return;
-                        }
-                    } else {
-                        db.set(key, value);
-                    }
+                    db.set(key, value);
                     encode_simple_string("OK")
                 }
             }
-
             "GET" => {
                 if args.len() < 2 {
-                    encode_error("GET needs key")
+                    encode_error("wrong number of arguments for 'get' command")
                 } else {
                     match db.get(&args[1]) {
                         Some(val) => encode_bulk_string(&val),
@@ -68,35 +69,19 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
                 }
             }
             "CONFIG" => {
-        if args.len() < 3 || args[1].to_uppercase() != "GET" {
-            encode_error("Only CONFIG GET is supported")
-        } else {
-            let key = &args[2];
-            match key.as_str() {
-                "dir" => {
-                    let items = vec!["dir".to_string(), config.dir.clone()];
-                    encode_array(&items)
-                }
-                "dbfilename" => {
-                    let items = vec!["dbfilename".to_string(), config.dbfilename.clone()];
-                    encode_array(&items)
-                }
-                _ => encode_error("Unknown CONFIG key")
-            }
-        }
-    }
-            "RPUSH" => {
-                    if args.len() < 3 {
-                        encode_error("RPUSH needs key and at least one value")
-                    } else {
-                        let key = args[1].clone();
-                        let elements: Vec<String> = args[2..].to_vec();
-                        match db.rpush(key, elements) {    // handling appenidng to a list
-                            Ok(list_len) => encode_integer(list_len as i64),
-                            Err(msg) => encode_error(msg),
+                if args.len() < 3 || args[1].to_uppercase() != "GET" {
+                    encode_error("Only CONFIG GET is supported")
+                } else {
+                    let key = &args[2];
+                    match key.as_str() {
+                        "dir" => encode_array(&["dir".to_string(), config.dir.clone()]),
+                        "dbfilename" => {
+                            encode_array(&["dbfilename".to_string(), config.dbfilename.clone()])
                         }
+                        _ => encode_error("Unknown CONFIG key"),
                     }
                 }
+            }
             "KEYS" => {
                 if args.len() == 2 && args[1] == "*" {
                     let keys = db.keys();
@@ -105,10 +90,40 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
                     encode_error("Only KEYS * is supported")
                 }
             }
+            "RPUSH" => {
+                if args.len() < 3 {
+                    encode_error("wrong number of arguments for 'rpush' command")
+                } else {
+                    let key = args[1].clone();
+                    let elements: Vec<String> = args[2..].to_vec();
+                    match db.rpush(key, elements) {
+                        Ok(list_len) => encode_integer(list_len as i64),
+                        Err(msg) => encode_error(msg),
+                    }
+                }
+            }
+            "LRANGE" => {
+                if args.len() != 4 {
+                    encode_error("wrong number of arguments for 'lrange' command")
+                } else {
+                    let key = &args[1];
+                    let start_res = args[2].parse::<usize>();
+                    let stop_res = args[3].parse::<usize>();
 
+                    if start_res.is_err() || stop_res.is_err() {
+                        encode_error("value is not an integer or out of range")
+                    } else {
+                        let start = start_res.unwrap();
+                        let stop = stop_res.unwrap();
+                        match db.lrange(key, start, stop) {
+                            Ok(elements) => encode_array(&elements),
+                            Err(msg) => encode_error(msg),
+                        }
+                    }
+                }
+            }
             _ => encode_error("Unknown command"),
         };
-
         stream.write_all(response.as_bytes()).unwrap();
     }
 }
