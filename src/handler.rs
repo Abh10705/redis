@@ -1,3 +1,4 @@
+use crate::commands;
 use crate::db::InMemoryDB;
 use crate::notifier::Notifier;
 use crate::resp::*;
@@ -5,6 +6,7 @@ use crate::Config;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration; // <-- Add this import
 
 pub fn handle_client(
     mut stream: TcpStream,
@@ -15,6 +17,7 @@ pub fn handle_client(
     let mut buffer = [0; 512];
 
     loop {
+        // ... unchanged ...
         let n = match stream.read(&mut buffer) {
             Ok(0) => return,
             Ok(n) => n,
@@ -36,169 +39,64 @@ pub fn handle_client(
                     encode_error("wrong number of arguments for 'blpop' command")
                 } else {
                     let key = args[1].clone();
-                    // Loop until we can pop an element
-                    loop {
-                        let mut db_lock = db_arc.lock().unwrap();
-                        // Try to pop an element non-blockingly first
-                        if let Ok(Some(element)) = db_lock.lpop(&key) {
-                            let items = vec![key, element];
-                            break encode_array(&items);
-                        }
+                    // **MODIFIED:** Parse the timeout argument
+                    let timeout_res = args[2].parse::<f64>();
 
-                        // If the list was empty, we need to block.
-                        let (tx, rx) = mpsc::channel();
-                        notifier.lock().unwrap().add_waiter(key.clone(), tx);
-                        
-                        // Release the database lock so other clients can push
-                        drop(db_lock); 
-                        
-                        // Wait for a signal.
-                        // We don't care about the result, it's just a wakeup call.
-                        let _ = rx.recv();
+                    if timeout_res.is_err() {
+                        encode_error("timeout is not a float or out of range")
+                    } else {
+                        let timeout = Duration::from_secs_f64(timeout_res.unwrap());
+                        loop {
+                            let mut db_lock = db_arc.lock().unwrap();
+                            if let Ok(Some(element)) = db_lock.lpop(&key) {
+                                let items = vec![key, element];
+                                break encode_array(&items);
+                            }
+
+                            // If timeout is 0, we can block "forever".
+                            // For simplicity in this stage, we handle non-zero timeouts.
+                            if timeout.as_secs() == 0 && timeout.subsec_nanos() == 0 {
+                                // This logic is for the previous stage, but we keep it
+                                let (tx, rx) = mpsc::channel();
+                                notifier.lock().unwrap().add_waiter(key.clone(), tx);
+                                drop(db_lock);
+                                let _ = rx.recv(); // Block forever
+                                continue; // Loop again to retry the pop
+                            }
+                            
+                            // **MODIFIED:** Block with a timeout
+                            let (tx, rx) = mpsc::channel();
+                            notifier.lock().unwrap().add_waiter(key.clone(), tx);
+                            drop(db_lock);
+                            
+                            match rx.recv_timeout(timeout) {
+                                Ok(_) => {
+                                    // Woken up by a push, loop again to retry pop
+                                    continue;
+                                }
+                                Err(_) => {
+                                    // Timeout reached, break and return null
+                                    break encode_null_bulk_string();
+                                }
+                            }
+                        }
                     }
                 }
             }
             _ => {
                 let mut db = db_arc.lock().unwrap();
                 match cmd.as_str() {
-                    "PING" => encode_simple_string("PONG"),
-                    "ECHO" => {
-                        if args.len() < 2 {
-                            encode_error("ECHO needs one argument")
-                        } else {
-                            encode_bulk_string(&args[1])
-                        }
-                    },
-                    "SET" => {
-                        if args.len() < 3 {
-                            encode_error("wrong number of arguments for 'set' command")
-                        } else if args.len() >= 5 && args[3].to_uppercase() == "PX" {
-                            let key = args[1].clone();
-                            let value = args[2].clone();
-                            match args[4].parse::<u64>() {
-                                Ok(ms) => {
-                                    db.set_with_expiry(key, value, ms);
-                                    encode_simple_string("OK")
-                                }
-                                Err(_) => {
-                                    encode_error("value is not an integer or out of range")
-                                }
-                            }
-                        } else {
-                            let key = args[1].clone();
-                            let value = args[2].clone();
-                            db.set(key, value);
-                            encode_simple_string("OK")
-                        }
-                    },
-                    "GET" => {
-                        if args.len() < 2 {
-                            encode_error("wrong number of arguments for 'get' command")
-                        } else {
-                            match db.get(&args[1]) {
-                                Some(val) => encode_bulk_string(&val),
-                                None => encode_null_bulk_string(),
-                            }
-                        }
-                    },
-                    "CONFIG" => {
-                        if args.len() < 3 || args[1].to_uppercase() != "GET" {
-                            encode_error("Only CONFIG GET is supported")
-                        } else {
-                            let key = &args[2];
-                            match key.as_str() {
-                                "dir" => encode_array(&["dir".to_string(), config.dir.clone()]),
-                                "dbfilename" => {
-                                    encode_array(&["dbfilename".to_string(), config.dbfilename.clone()])
-                                }
-                                _ => encode_error("Unknown CONFIG key"),
-                            }
-                        }
-                    },
-                    "KEYS" => {
-                        if args.len() == 2 && args[1] == "*" {
-                            let keys = db.keys();
-                            encode_array(&keys)
-                        } else {
-                            encode_error("Only KEYS * is supported")
-                        }
-                    },
-                    "LPUSH" => {
-                        if args.len() < 3 {
-                            encode_error("wrong number of arguments for 'lpush' command")
-                        } else {
-                            let key = args[1].clone();
-                            let elements: Vec<String> = args[2..].to_vec();
-                            match db.lpush(key, elements, &notifier) {
-                                Ok(list_len) => encode_integer(list_len as i64),
-                                Err(msg) => encode_error(msg),
-                            }
-                        }
-                    },
-                    "RPUSH" => {
-                        if args.len() < 3 {
-                            encode_error("wrong number of arguments for 'rpush' command")
-                        } else {
-                            let key = args[1].clone();
-                            let elements: Vec<String> = args[2..].to_vec();
-                            match db.rpush(key, elements, &notifier) {
-                                Ok(list_len) => encode_integer(list_len as i64),
-                                Err(msg) => encode_error(msg),
-                            }
-                        }
-                    },
-                    "LPOP" => {
-                        if args.len() < 2 || args.len() > 3 {
-                            encode_error("wrong number of arguments for 'lpop' command")
-                        } else if args.len() == 2 {
-                            let key = &args[1];
-                            match db.lpop(key) {
-                                Ok(Some(element)) => encode_bulk_string(&element),
-                                Ok(None) => encode_null_bulk_string(),
-                                Err(msg) => encode_error(msg),
-                            }
-                        } else {
-                            let key = &args[1];
-                            match args[2].parse::<usize>() {
-                                Ok(count) => match db.lpop_count(key, count) {
-                                    Ok(elements) => encode_array(&elements),
-                                    Err(msg) => encode_error(msg),
-                                },
-                                Err(_) => encode_error("value is not an integer or out of range"),
-                            }
-                        }
-                    },
-                    "LLEN" => {
-                        if args.len() != 2 {
-                            encode_error("wrong number of arguments for 'llen' command")
-                        } else {
-                            let key = &args[1];
-                            match db.llen(key) {
-                                Ok(list_len) => encode_integer(list_len as i64),
-                                Err(msg) => encode_error(msg),
-                            }
-                        }
-                    },
-                    "LRANGE" => {
-                        if args.len() != 4 {
-                            encode_error("wrong number of arguments for 'lrange' command")
-                        } else {
-                            let key = &args[1];
-                            let start_res = args[2].parse::<isize>();
-                            let stop_res = args[3].parse::<isize>();
-
-                            if start_res.is_err() || stop_res.is_err() {
-                                encode_error("value is not an integer or out of range")
-                            } else {
-                                let start = start_res.unwrap();
-                                let stop = stop_res.unwrap();
-                                match db.lrange(key, start, stop) {
-                                    Ok(elements) => encode_array(&elements),
-                                    Err(msg) => encode_error(msg),
-                                }
-                            }
-                        }
-                    },
+                    "PING" => commands::handle_ping(&args),
+                    "ECHO" => commands::handle_echo(&args),
+                    "SET" => commands::handle_set(&args, &mut db),
+                    "GET" => commands::handle_get(&args, &mut db),
+                    "CONFIG" => commands::handle_config(&args, &config),
+                    "KEYS" => commands::handle_keys(&args, &mut db),
+                    "LPUSH" => commands::handle_lpush(&args, &mut db, &notifier),
+                    "RPUSH" => commands::handle_rpush(&args, &mut db, &notifier),
+                    "LPOP" => commands::handle_lpop(&args, &mut db),
+                    "LLEN" => commands::handle_llen(&args, &mut db),
+                    "LRANGE" => commands::handle_lrange(&args, &mut db),
                     _ => encode_error("Unknown command"),
                 }
             }

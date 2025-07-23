@@ -4,6 +4,9 @@ mod lists;
 mod notifier;
 mod rdb;
 mod resp;
+mod commands;
+
+
 
 use db::InMemoryDB;
 use handler::handle_client;
