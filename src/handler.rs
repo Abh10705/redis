@@ -121,7 +121,19 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
                     }
                 }
             }
-            // In src/handler.rs
+            
+            // ADD THIS NEW MATCH ARM
+            "LLEN" => {
+                if args.len() != 2 {
+                    encode_error("wrong number of arguments for 'llen' command")
+                } else {
+                    let key = &args[1];
+                    match db.llen(key) {
+                        Ok(list_len) => encode_integer(list_len as i64),
+                        Err(msg) => encode_error(msg),
+                    }
+                }
+            }
 
             "LRANGE" => {
                 if args.len() != 4 {

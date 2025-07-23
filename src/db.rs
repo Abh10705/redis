@@ -17,7 +17,6 @@ pub struct InMemoryDB {
     map: HashMap<String, Entry>,
 }
 
-// **THE FIX:** Ensure all functions are inside this `impl` block
 impl InMemoryDB {
     pub fn new() -> Self {
         Self { map: HashMap::new() }
@@ -115,6 +114,23 @@ impl InMemoryDB {
             Ok(list.len())
         } else {
             Err("WRONGTYPE Operation against a key holding the wrong kind of value")
+        }
+    }
+    
+    // **THE FIX:** `llen` is now correctly placed inside the `impl` block.
+    pub fn llen(&mut self, key: &str) -> Result<usize, &'static str> {
+        if let Some(entry) = self.map.get_mut(key) {
+            if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
+                self.map.remove(key);
+                return Ok(0);
+            }
+
+            match &entry.value {
+                RedisValue::List(list) => Ok(list.len()),
+                _ => Err("WRONGTYPE Operation against a key holding the wrong kind of value"),
+            }
+        } else {
+            Ok(0)
         }
     }
 }
