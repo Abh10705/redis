@@ -1,25 +1,29 @@
 // **FIX 3:** Update the use statements.
 use crate::db::{Entry, InMemoryDB, RedisValue};
 use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use crate::notifier::Notifier;
+
 
 impl InMemoryDB {
-    pub fn rpush(&mut self, key: String, elements: Vec<String>) -> Result<usize, &'static str> {
+    pub fn rpush(&mut self, key: String, elements: Vec<String>,notifier: &Arc<Mutex<Notifier>>,) -> Result<usize, &'static str> {
         // **FIX 4:** Correctly reference the `Entry` struct.
-        let entry = self.map.entry(key).or_insert_with(|| Entry {
+        let entry = self.map.entry(key.clone()).or_insert_with(|| Entry {
             value: RedisValue::List(Vec::new()),
             expires_at: None,
         });
 
         if let RedisValue::List(list) = &mut entry.value {
             list.extend(elements);
+            notifier.lock().unwrap().notify_waiter(&key);
             Ok(list.len())
         } else {
             Err("WRONGTYPE Operation against a key holding the wrong kind of value")
         }
     }
 
-    pub fn lpush(&mut self, key: String, elements: Vec<String>) -> Result<usize, &'static str> {
-        let entry = self.map.entry(key).or_insert_with(|| Entry {
+    pub fn lpush(&mut self, key: String, elements: Vec<String>, notifier: &Arc<Mutex<Notifier>>,) -> Result<usize, &'static str> {
+        let entry = self.map.entry(key.clone()).or_insert_with(|| Entry {
             value: RedisValue::List(Vec::new()),
             expires_at: None,
         });
@@ -28,6 +32,8 @@ impl InMemoryDB {
             for element in elements {
                 list.insert(0, element);
             }
+            let len = list.len();
+            notifier.lock().unwrap().notify_waiter(&key);
             Ok(list.len())
         } else {
             Err("WRONGTYPE Operation against a key holding the wrong kind of value")
