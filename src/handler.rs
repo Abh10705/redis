@@ -135,6 +135,20 @@ pub fn handle_client(mut stream: TcpStream, db: Arc<Mutex<InMemoryDB>>, config: 
                 }
             }
 
+        
+            "LPOP" => {
+                if args.len() != 2 {
+                    encode_error("wrong number of arguments for 'lpop' command")
+                } else {
+                    let key = &args[1];
+                    match db.lpop(key) {
+                        Ok(Some(element)) => encode_bulk_string(&element),
+                        Ok(None) => encode_null_bulk_string(),
+                        Err(msg) => encode_error(msg),
+                    }
+                }
+            }
+
             "LRANGE" => {
                 if args.len() != 4 {
                     encode_error("wrong number of arguments for 'lrange' command")
