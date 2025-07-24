@@ -143,6 +143,7 @@ pub fn handle_client(
                         "ECHO" => commands::handle_echo(&args),
                         "SET" => commands::handle_set(&args, &mut db),
                         "GET" => commands::handle_get(&args, &mut db),
+                        "INFO" => commands::handle_info(&args),
                         "INCR" => commands::handle_incr(&args, &mut db),
                         "CONFIG" => commands::handle_config(&args, &config),
                         "KEYS" => commands::handle_keys(&args, &mut db),
