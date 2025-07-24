@@ -89,6 +89,7 @@ pub fn handle_client(
                     "PING" => commands::handle_ping(&args),
                     "ECHO" => commands::handle_echo(&args),
                     "MULTI" => encode_simple_string("OK"),
+                    "EXEC" => encode_error("EXEC without MULTI"),
                     "SET" => commands::handle_set(&args, &mut db),
                     "GET" => commands::handle_get(&args, &mut db),
                     "INCR" => commands::handle_incr(&args, &mut db),
