@@ -55,7 +55,11 @@ fn main() {
         dir: dir.clone(),
         dbfilename: dbfilename.clone(),
     });
-    let server_state = Arc::new(Mutex::new(ServerState { role }));
+    let server_state = Arc::new(Mutex::new(ServerState {
+        role,
+        master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
+        master_repl_offset: 0,
+    }));
     let db_arc = Arc::new(Mutex::new(InMemoryDB::new()));
     let notifier_arc = Arc::new(Mutex::new(Notifier::new()));
 
