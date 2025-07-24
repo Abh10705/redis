@@ -4,7 +4,7 @@ use crate::notifier::Notifier;
 use crate::resp::*;
 use crate::Config;
 use std::sync::{Arc, Mutex};
-
+use crate::ServerState; 
 // Each function handles one specific command.
 
 pub fn handle_ping(_args: &[String]) -> String {
@@ -166,15 +166,12 @@ pub fn handle_incr(args: &[String], db: &mut InMemoryDB) -> String {
     }
 }
 
-
-pub fn handle_info(args: &[String]) -> String {
+pub fn handle_info(args: &[String], state: &ServerState) -> String {
     if args.len() > 1 && args[1].to_lowercase() == "replication" {
-        // For now, we are always a master.
-        let info = "role:master";
-        encode_bulk_string(info)
+        // **MODIFIED:** Read the role from the server state.
+        let info = format!("role:{}", state.role);
+        encode_bulk_string(&info)
     } else {
-        // In a real server, we'd handle other sections or a default case.
-        // For now, an empty response is fine if the arg isn't "replication".
         encode_bulk_string("")
     }
 }

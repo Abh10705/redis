@@ -19,45 +19,41 @@ pub struct Config {
     dbfilename: String,
 }
 
+pub struct ServerState {
+    pub role: String,
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut dir = ".".to_string();
     let mut dbfilename = "dump.rdb".to_string();
-    // **NEW:** Add a variable for the port with a default value.
     let mut port = 6379;
+    let mut role = "master".to_string();
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--dir" => {
-                i += 1;
-                if i < args.len() {
-                    dir = args[i].clone();
-                }
-            }
-            "--dbfilename" => {
-                i += 1;
-                if i < args.len() {
-                    dbfilename = args[i].clone();
-                }
-            }
-            // **NEW:** Add a case to handle the --port argument.
             "--port" => {
                 i += 1;
                 if i < args.len() {
                     port = args[i].parse::<u16>().unwrap_or(6379);
                 }
             }
-            _ => {}
+            "--replicaof" => {
+                role = "slave".to_string();
+                i += 2;
+            }
+            "--dir" => { /* ... unchanged ... */ },
+            "--dbfilename" => { /* ... unchanged ... */ },
+            _ => { i += 1; }
         }
-        i += 1;
     }
 
     let config = Arc::new(Config {
         dir: dir.clone(),
         dbfilename: dbfilename.clone(),
     });
-
+    let server_state = Arc::new(Mutex::new(ServerState { role }));
     let db_arc = Arc::new(Mutex::new(InMemoryDB::new()));
     let notifier_arc = Arc::new(Mutex::new(Notifier::new()));
 
@@ -81,7 +77,6 @@ fn main() {
         }
     }
 
-    // **MODIFIED:** Use the port variable to bind the listener.
     let listener_address = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(&listener_address).unwrap();
     println!("Listening on {}", listener_address);
@@ -92,8 +87,9 @@ fn main() {
                 let db_clone = Arc::clone(&db_arc);
                 let config_clone = Arc::clone(&config);
                 let notifier_clone = Arc::clone(&notifier_arc);
+                let state_clone = Arc::clone(&server_state);
                 std::thread::spawn(move || {
-                    handle_client(stream, db_clone, config_clone, notifier_clone)
+                    handle_client(stream, db_clone, config_clone, notifier_clone, state_clone)
                 });
             }
             Err(e) => {

@@ -2,17 +2,19 @@ use crate::commands;
 use crate::db::InMemoryDB;
 use crate::notifier::Notifier;
 use crate::resp::*;
-use crate::Config;
+use crate::{Config, ServerState}; 
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
+
 
 pub fn handle_client(
     mut stream: TcpStream,
     db_arc: Arc<Mutex<InMemoryDB>>,
     config: Arc<Config>,
     notifier: Arc<Mutex<Notifier>>,
+    state_arc: Arc<Mutex<ServerState>>,
 ) {
     let mut buffer = [0; 512];
     let mut in_transaction = false;
@@ -138,12 +140,13 @@ pub fn handle_client(
                 } else {
                     // Otherwise, execute the command immediately.
                     let mut db = db_arc.lock().unwrap();
+                    let state = state_arc.lock().unwrap();
                     match cmd.as_str() {
                         "PING" => commands::handle_ping(&args),
                         "ECHO" => commands::handle_echo(&args),
                         "SET" => commands::handle_set(&args, &mut db),
                         "GET" => commands::handle_get(&args, &mut db),
-                        "INFO" => commands::handle_info(&args),
+                        "INFO" => commands::handle_info(&args, &state),
                         "INCR" => commands::handle_incr(&args, &mut db),
                         "CONFIG" => commands::handle_config(&args, &config),
                         "KEYS" => commands::handle_keys(&args, &mut db),
