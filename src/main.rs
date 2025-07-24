@@ -10,13 +10,15 @@ use db::InMemoryDB;
 use handler::handle_client;
 use notifier::Notifier;
 use rdb::load_db_from_rdb;
-use std::net::TcpListener;
+use std::io::Write;
+use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 pub struct Config {
-    dir: String,
-    dbfilename: String,
+    pub dir: String,
+    pub dbfilename: String,
 }
 
 pub struct ServerState {
@@ -31,6 +33,7 @@ fn main() {
     let mut dbfilename = "dump.rdb".to_string();
     let mut port = 6379;
     let mut role = "master".to_string();
+    let mut master_addr: Option<String> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -43,12 +46,43 @@ fn main() {
             }
             "--replicaof" => {
                 role = "slave".to_string();
-                i += 2;
+                i += 1;
+                if i < args.len() {
+                    let parts: Vec<&str> = args[i].split_whitespace().collect();
+                    if parts.len() == 2 {
+                        master_addr = Some(format!("{}:{}", parts[0], parts[1]));
+                    }
+                }
             }
-            "--dir" => { /* ... unchanged ... */ },
-            "--dbfilename" => { /* ... unchanged ... */ },
-            _ => { i += 1; }
+            "--dir" => {
+                i += 1;
+                if i < args.len() {
+                    dir = args[i].clone();
+                }
+            }
+            "--dbfilename" => {
+                i += 1;
+                if i < args.len() {
+                    dbfilename = args[i].clone();
+                }
+            }
+            _ => {}
         }
+        i += 1;
+    }
+
+    if let Some(addr) = master_addr {
+        thread::spawn(move || {
+            println!("Connecting to master at {}", addr);
+            if let Ok(mut stream) = TcpStream::connect(addr) {
+                println!("Connected to master. Sending PING.");
+                let ping_cmd = resp::encode_array(&["PING".to_string()]);
+                stream.write_all(ping_cmd.as_bytes()).unwrap();
+                println!("Sent PING to master.");
+            } else {
+                eprintln!("Failed to connect to master.");
+            }
+        });
     }
 
     let config = Arc::new(Config {
@@ -94,7 +128,7 @@ fn main() {
                 let config_clone = Arc::clone(&config);
                 let notifier_clone = Arc::clone(&notifier_arc);
                 let state_clone = Arc::clone(&server_state);
-                std::thread::spawn(move || {
+                thread::spawn(move || {
                     handle_client(stream, db_clone, config_clone, notifier_clone, state_clone)
                 });
             }
