@@ -43,17 +43,20 @@ impl InMemoryDB {
         self.map.insert(key, entry);
     }
     
-    pub fn get(&mut self, key: &str) -> Option<String> {
+    pub fn get(&mut self, key: &str) -> Result<Option<String>, &'static str> {
         if let Some(entry) = self.map.get_mut(key) {
             if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
                 self.map.remove(key);
-                return None;
+                return Ok(None);
             }
-            if let RedisValue::String(s) = &entry.value {
-                return Some(s.clone());
+
+            match &entry.value {
+                RedisValue::String(s) => Ok(Some(s.clone())),
+                _ => Err("WRONGTYPE Operation against a key holding the wrong kind of value"),
             }
+        } else {
+            Ok(None)
         }
-        None
     }
     
     pub fn keys(&mut self) -> Vec<String> {

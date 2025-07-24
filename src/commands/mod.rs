@@ -19,18 +19,19 @@ pub fn handle_echo(args: &[String]) -> String {
         encode_bulk_string(&args[1])
     }
 }
+// In src/commands/mod.rs
 
 pub fn handle_get(args: &[String], db: &mut InMemoryDB) -> String {
     if args.len() != 2 {
         encode_error("wrong number of arguments for 'get' command")
     } else {
         match db.get(&args[1]) {
-            Some(val) => encode_bulk_string(&val),
-            None => encode_null_bulk_string(),
+            Ok(Some(val)) => encode_bulk_string(&val),
+            Ok(None) => encode_null_bulk_string(),
+            Err(msg) => encode_error(msg),
         }
     }
 }
-
 pub fn handle_set(args: &[String], db: &mut InMemoryDB) -> String {
     if args.len() < 3 {
         encode_error("wrong number of arguments for 'set' command")
