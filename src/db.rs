@@ -13,14 +13,10 @@ pub struct Entry {
     pub expires_at: Option<Instant>,
 }
 
-// **FIX 1:** Make the struct itself public.
 pub struct InMemoryDB {
-    // **FIX 2:** Make the `map` field public *within the crate*.
-    // This allows our `lists.rs` module to access it.
     pub(crate) map: HashMap<String, Entry>,
 }
 
-// This block now only contains the CORE, non-list methods.
 impl InMemoryDB {
     pub fn new() -> Self {
         Self { map: HashMap::new() }
@@ -43,6 +39,7 @@ impl InMemoryDB {
         self.map.insert(key, entry);
     }
     
+    // **THIS IS THE CORRECTED GET METHOD**
     pub fn get(&mut self, key: &str) -> Result<Option<String>, &'static str> {
         if let Some(entry) = self.map.get_mut(key) {
             if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
@@ -63,19 +60,18 @@ impl InMemoryDB {
         self.map.retain(|_, v| v.expires_at.map_or(true, |t| t > Instant::now()));
         self.map.keys().cloned().collect()
     }
+
     pub fn incr(&mut self, key: &str) -> Result<i64, &'static str> {
         if let Some(entry) = self.map.get_mut(key) {
             if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
                 self.map.remove(key);
-
-                return Err("Key does not exist or is expired"); 
+                return Err("Key does not exist or is expired");
             }
-
             if let RedisValue::String(s) = &mut entry.value {
                 match s.parse::<i64>() {
                     Ok(mut num) => {
                         num += 1;
-                        *s = num.to_string(); // Update the string value in place
+                        *s = num.to_string();
                         Ok(num)
                     }
                     Err(_) => Err("value is not an integer or out of range"),
@@ -84,7 +80,6 @@ impl InMemoryDB {
                 Err("WRONGTYPE Operation against a key holding the wrong kind of value")
             }
         } else {
-            // For this stage, we error. Later, we will set the key to "1".
             Err("no such key")
         }
     }

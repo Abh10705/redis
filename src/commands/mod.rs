@@ -1,4 +1,3 @@
-// In src/commands/mod.rs
 
 use crate::db::InMemoryDB;
 use crate::notifier::Notifier;
@@ -20,7 +19,6 @@ pub fn handle_echo(args: &[String]) -> String {
     }
 }
 // In src/commands/mod.rs
-
 pub fn handle_get(args: &[String], db: &mut InMemoryDB) -> String {
     if args.len() != 2 {
         encode_error("wrong number of arguments for 'get' command")
