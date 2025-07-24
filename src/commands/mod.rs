@@ -180,3 +180,8 @@ pub fn handle_info(args: &[String], state: &ServerState) -> String {
         encode_bulk_string("")
     }
 }
+
+pub fn handle_replconf(_args: &[String]) -> String {
+    // For now, we just need to accept any REPLCONF and reply with OK.
+    encode_simple_string("OK")
+}
