@@ -1,3 +1,4 @@
+// In src/commands/mod.rs
 
 use crate::db::InMemoryDB;
 use crate::notifier::Notifier;
@@ -150,6 +151,18 @@ pub fn handle_lrange(args: &[String], db: &mut InMemoryDB) -> String {
                 Ok(elements) => encode_array(&elements),
                 Err(msg) => encode_error(msg),
             }
+        }
+    }
+}
+
+pub fn handle_incr(args: &[String], db: &mut InMemoryDB) -> String {
+    if args.len() != 2 {
+        encode_error("wrong number of arguments for 'incr' command")
+    } else {
+        let key = &args[1];
+        match db.incr(key) {
+            Ok(new_value) => encode_integer(new_value),
+            Err(msg) => encode_error(msg),
         }
     }
 }

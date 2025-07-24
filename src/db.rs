@@ -60,4 +60,29 @@ impl InMemoryDB {
         self.map.retain(|_, v| v.expires_at.map_or(true, |t| t > Instant::now()));
         self.map.keys().cloned().collect()
     }
+    pub fn incr(&mut self, key: &str) -> Result<i64, &'static str> {
+        if let Some(entry) = self.map.get_mut(key) {
+            if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
+                self.map.remove(key);
+
+                return Err("Key does not exist or is expired"); 
+            }
+
+            if let RedisValue::String(s) = &mut entry.value {
+                match s.parse::<i64>() {
+                    Ok(mut num) => {
+                        num += 1;
+                        *s = num.to_string(); // Update the string value in place
+                        Ok(num)
+                    }
+                    Err(_) => Err("value is not an integer or out of range"),
+                }
+            } else {
+                Err("WRONGTYPE Operation against a key holding the wrong kind of value")
+            }
+        } else {
+            // For this stage, we error. Later, we will set the key to "1".
+            Err("no such key")
+        }
+    }
 }
