@@ -1,10 +1,10 @@
+mod commands;
 mod db;
 mod handler;
 mod lists;
 mod notifier;
 mod rdb;
 mod resp;
-mod commands;
 
 use db::InMemoryDB;
 use handler::handle_client;
@@ -23,12 +23,31 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut dir = ".".to_string();
     let mut dbfilename = "dump.rdb".to_string();
+    // **NEW:** Add a variable for the port with a default value.
+    let mut port = 6379;
 
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--dir" => { /* ... unchanged ... */ },
-            "--dbfilename" => { /* ... unchanged ... */ },
+            "--dir" => {
+                i += 1;
+                if i < args.len() {
+                    dir = args[i].clone();
+                }
+            }
+            "--dbfilename" => {
+                i += 1;
+                if i < args.len() {
+                    dbfilename = args[i].clone();
+                }
+            }
+            // **NEW:** Add a case to handle the --port argument.
+            "--port" => {
+                i += 1;
+                if i < args.len() {
+                    port = args[i].parse::<u16>().unwrap_or(6379);
+                }
+            }
             _ => {}
         }
         i += 1;
@@ -40,7 +59,6 @@ fn main() {
     });
 
     let db_arc = Arc::new(Mutex::new(InMemoryDB::new()));
-    // **THE FIX:** Renamed `notifier` to `notifier_arc` to avoid conflict with the module name.
     let notifier_arc = Arc::new(Mutex::new(Notifier::new()));
 
     let rdb_path = Path::new(&dir).join(&dbfilename);
@@ -63,8 +81,10 @@ fn main() {
         }
     }
 
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
-    println!("Listening on port 6379");
+    // **MODIFIED:** Use the port variable to bind the listener.
+    let listener_address = format!("127.0.0.1:{}", port);
+    let listener = TcpListener::bind(&listener_address).unwrap();
+    println!("Listening on {}", listener_address);
 
     for stream in listener.incoming() {
         match stream {
