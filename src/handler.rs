@@ -6,7 +6,7 @@ use crate::Config;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration; // <-- Add this import
+use std::time::Duration;
 
 pub fn handle_client(
     mut stream: TcpStream,
@@ -15,9 +15,10 @@ pub fn handle_client(
     notifier: Arc<Mutex<Notifier>>,
 ) {
     let mut buffer = [0; 512];
+    // **NEW:** A state flag for the current connection.
+    let mut in_transaction = false;
 
     loop {
-        // ... unchanged ...
         let n = match stream.read(&mut buffer) {
             Ok(0) => return,
             Ok(n) => n,
@@ -34,6 +35,19 @@ pub fn handle_client(
         let cmd = args[0].to_uppercase();
 
         let response = match cmd.as_str() {
+            // **MODIFIED:** MULTI and EXEC are now handled here directly.
+            "MULTI" => {
+                in_transaction = true;
+                encode_simple_string("OK")
+            }
+            "EXEC" => {
+                if in_transaction {
+                    in_transaction = false; // Reset the state
+                    encode_array(&[]) // Return an empty array
+                } else {
+                    encode_error("EXEC without MULTI")
+                }
+            }
             "BLPOP" => {
                 if args.len() != 3 {
                     encode_error("wrong number of arguments for 'blpop' command")
