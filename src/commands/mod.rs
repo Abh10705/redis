@@ -185,3 +185,14 @@ pub fn handle_replconf(_args: &[String]) -> String {
     // For now, we just need to accept any REPLCONF and reply with OK.
     encode_simple_string("OK")
 }
+// In src/commands/mod.rs
+
+// Add this new function
+pub fn handle_psync(args: &[String], state: &ServerState) -> String {
+    if args.len() == 3 && args[1] == "?" && args[2] == "-1" {
+        let response = format!("FULLRESYNC {} 0", state.master_replid);
+        encode_simple_string(&response)
+    } else {
+        encode_error("PSYNC command not supported in this format")
+    }
+}
