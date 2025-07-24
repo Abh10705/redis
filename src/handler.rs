@@ -44,6 +44,15 @@ pub fn handle_client(
                     encode_simple_string("OK")
                 }
             }
+            "DISCARD" => {
+                if !in_transaction {
+                    encode_error("DISCARD without MULTI")
+                } else {
+                    in_transaction = false;
+                    command_queue.clear();
+                    encode_simple_string("OK")
+                }
+            }
             "EXEC" => {
                 if !in_transaction {
                     encode_error("EXEC without MULTI")
