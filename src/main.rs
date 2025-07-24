@@ -21,6 +21,8 @@ pub struct Config {
 
 pub struct ServerState {
     pub role: String,
+    pub master_replid: String,
+    pub master_repl_offset: usize,
 }
 
 fn main() {

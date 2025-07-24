@@ -168,8 +168,13 @@ pub fn handle_incr(args: &[String], db: &mut InMemoryDB) -> String {
 
 pub fn handle_info(args: &[String], state: &ServerState) -> String {
     if args.len() > 1 && args[1].to_lowercase() == "replication" {
-        // **MODIFIED:** Read the role from the server state.
-        let info = format!("role:{}", state.role);
+        // **MODIFIED:** Add the new fields to the response string.
+        let info = format!(
+            "role:{}\r\nmaster_replid:{}\r\nmaster_repl_offset:{}",
+            state.role,
+            state.master_replid,
+            state.master_repl_offset
+        );
         encode_bulk_string(&info)
     } else {
         encode_bulk_string("")
