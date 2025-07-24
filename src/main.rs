@@ -10,7 +10,7 @@ use db::InMemoryDB;
 use handler::handle_client;
 use notifier::Notifier;
 use rdb::load_db_from_rdb;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
