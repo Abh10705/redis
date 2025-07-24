@@ -72,13 +72,37 @@ fn main() {
     }
 
     if let Some(addr) = master_addr {
+        let replica_port = port;
         thread::spawn(move || {
             println!("Connecting to master at {}", addr);
             if let Ok(mut stream) = TcpStream::connect(addr) {
                 println!("Connected to master. Sending PING.");
+                let mut buffer = [0; 512];
+               
                 let ping_cmd = resp::encode_array(&["PING".to_string()]);
                 stream.write_all(ping_cmd.as_bytes()).unwrap();
-                println!("Sent PING to master.");
+                stream.read(&mut buffer).unwrap(); // Read the +PONG
+
+                // 2. Send REPLCONF listening-port
+                let replconf_port_cmd = resp::encode_array(&[
+                    "REPLCONF".to_string(),
+                    "listening-port".to_string(),
+                    replica_port.to_string(),
+                ]);
+                stream.write_all(replconf_port_cmd.as_bytes()).unwrap();
+                stream.read(&mut buffer).unwrap(); // Read the +OK
+
+                // 3. Send REPLCONF capa psync2
+                let replconf_capa_cmd = resp::encode_array(&[
+                    "REPLCONF".to_string(),
+                    "capa".to_string(),
+                    "psync2".to_string(),
+                ]);
+                stream.write_all(replconf_capa_cmd.as_bytes()).unwrap();
+                stream.read(&mut buffer).unwrap(); // Read the +OK
+                
+                println!("Finished handshake with master.");
+
             } else {
                 eprintln!("Failed to connect to master.");
             }

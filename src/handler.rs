@@ -144,7 +144,7 @@ pub fn handle_client(
                     match cmd.as_str() {
                         "PING" => commands::handle_ping(&args),
                         "ECHO" => commands::handle_echo(&args),
-                        "REPLCONF" => commands::handle_replconf(&args),
+                         "REPLCONF" => commands::handle_replconf(&args),"REPLCONF" => commands::handle_replconf(&args),
                         "SET" => commands::handle_set(&args, &mut db),
                         "GET" => commands::handle_get(&args, &mut db),
                         "INFO" => commands::handle_info(&args, &state),
