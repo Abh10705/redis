@@ -15,8 +15,8 @@ pub fn handle_client(
     notifier: Arc<Mutex<Notifier>>,
 ) {
     let mut buffer = [0; 512];
-    // **NEW:** A state flag for the current connection.
     let mut in_transaction = false;
+    let mut command_queue: Vec<Vec<String>> = Vec::new();
 
     loop {
         let n = match stream.read(&mut buffer) {
@@ -35,25 +35,32 @@ pub fn handle_client(
         let cmd = args[0].to_uppercase();
 
         let response = match cmd.as_str() {
-            // **MODIFIED:** MULTI and EXEC are now handled here directly.
             "MULTI" => {
-                in_transaction = true;
-                encode_simple_string("OK")
+                if in_transaction {
+                    encode_error("MULTI calls can not be nested")
+                } else {
+                    in_transaction = true;
+                    command_queue.clear();
+                    encode_simple_string("OK")
+                }
             }
             "EXEC" => {
-                if in_transaction {
-                    in_transaction = false; // Reset the state
-                    encode_array(&[]) // Return an empty array
-                } else {
+                if !in_transaction {
                     encode_error("EXEC without MULTI")
+                } else {
+                    in_transaction = false;
+                    // For now, we just return an empty array.
+                    // Later, we'll execute the queued commands here.
+                    command_queue.clear();
+                    encode_array(&[])
                 }
             }
             "BLPOP" => {
+                // BLPOP is a special case and is not queued in a transaction.
                 if args.len() != 3 {
                     encode_error("wrong number of arguments for 'blpop' command")
                 } else {
                     let key = args[1].clone();
-                    // **MODIFIED:** Parse the timeout argument
                     let timeout_res = args[2].parse::<f64>();
 
                     if timeout_res.is_err() {
@@ -67,54 +74,50 @@ pub fn handle_client(
                                 break encode_array(&items);
                             }
 
-                            // If timeout is 0, we can block "forever".
-                            // For simplicity in this stage, we handle non-zero timeouts.
                             if timeout.as_secs() == 0 && timeout.subsec_nanos() == 0 {
-                                // This logic is for the previous stage, but we keep it
                                 let (tx, rx) = mpsc::channel();
                                 notifier.lock().unwrap().add_waiter(key.clone(), tx);
                                 drop(db_lock);
-                                let _ = rx.recv(); // Block forever
-                                continue; // Loop again to retry the pop
+                                let _ = rx.recv();
+                                continue;
                             }
                             
-                            // **MODIFIED:** Block with a timeout
                             let (tx, rx) = mpsc::channel();
                             notifier.lock().unwrap().add_waiter(key.clone(), tx);
                             drop(db_lock);
                             
                             match rx.recv_timeout(timeout) {
-                                Ok(_) => {
-                                    // Woken up by a push, loop again to retry pop
-                                    continue;
-                                }
-                                Err(_) => {
-                                    // Timeout reached, break and return null
-                                    break encode_null_bulk_string();
-                                }
+                                Ok(_) => continue,
+                                Err(_) => break encode_null_bulk_string(),
                             }
                         }
                     }
                 }
             }
+            // Handle all other commands
             _ => {
-                let mut db = db_arc.lock().unwrap();
-                match cmd.as_str() {
-                    "PING" => commands::handle_ping(&args),
-                    "ECHO" => commands::handle_echo(&args),
-                    "MULTI" => encode_simple_string("OK"),
-                    "EXEC" => encode_error("EXEC without MULTI"),
-                    "SET" => commands::handle_set(&args, &mut db),
-                    "GET" => commands::handle_get(&args, &mut db),
-                    "INCR" => commands::handle_incr(&args, &mut db),
-                    "CONFIG" => commands::handle_config(&args, &config),
-                    "KEYS" => commands::handle_keys(&args, &mut db),
-                    "LPUSH" => commands::handle_lpush(&args, &mut db, &notifier),
-                    "RPUSH" => commands::handle_rpush(&args, &mut db, &notifier),
-                    "LPOP" => commands::handle_lpop(&args, &mut db),
-                    "LLEN" => commands::handle_llen(&args, &mut db),
-                    "LRANGE" => commands::handle_lrange(&args, &mut db),
-                    _ => encode_error("Unknown command"),
+                if in_transaction {
+                    // If we are in a transaction, queue the command and reply "QUEUED".
+                    command_queue.push(args);
+                    encode_simple_string("QUEUED")
+                } else {
+                    // Otherwise, execute the command immediately.
+                    let mut db = db_arc.lock().unwrap();
+                    match cmd.as_str() {
+                        "PING" => commands::handle_ping(&args),
+                        "ECHO" => commands::handle_echo(&args),
+                        "SET" => commands::handle_set(&args, &mut db),
+                        "GET" => commands::handle_get(&args, &mut db),
+                        "INCR" => commands::handle_incr(&args, &mut db),
+                        "CONFIG" => commands::handle_config(&args, &config),
+                        "KEYS" => commands::handle_keys(&args, &mut db),
+                        "LPUSH" => commands::handle_lpush(&args, &mut db, &notifier),
+                        "RPUSH" => commands::handle_rpush(&args, &mut db, &notifier),
+                        "LPOP" => commands::handle_lpop(&args, &mut db),
+                        "LLEN" => commands::handle_llen(&args, &mut db),
+                        "LRANGE" => commands::handle_lrange(&args, &mut db),
+                        _ => encode_error("Unknown command"),
+                    }
                 }
             }
         };
