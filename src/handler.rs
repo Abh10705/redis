@@ -88,6 +88,7 @@ pub fn handle_client(
                 match cmd.as_str() {
                     "PING" => commands::handle_ping(&args),
                     "ECHO" => commands::handle_echo(&args),
+                    "MULTI" => encode_simple_string("OK"),
                     "SET" => commands::handle_set(&args, &mut db),
                     "GET" => commands::handle_get(&args, &mut db),
                     "INCR" => commands::handle_incr(&args, &mut db),
