@@ -8,6 +8,7 @@ use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
+
 pub fn handle_client(
     mut stream: TcpStream,
     db_arc: Arc<Mutex<InMemoryDB>>,
@@ -49,10 +50,30 @@ pub fn handle_client(
                     encode_error("EXEC without MULTI")
                 } else {
                     in_transaction = false;
-                    // For now, we just return an empty array.
-                    // Later, we'll execute the queued commands here.
+                    let mut responses = Vec::with_capacity(command_queue.len());
+                    let mut db = db_arc.lock().unwrap();
+                    // Execute each command in the queue
+                    for queued_args in &command_queue {
+                        let queued_cmd = queued_args[0].to_uppercase();
+                        let response = match queued_cmd.as_str() {
+                            "PING" => commands::handle_ping(queued_args),
+                            "ECHO" => commands::handle_echo(queued_args),
+                            "SET" => commands::handle_set(queued_args, &mut db),
+                            "GET" => commands::handle_get(queued_args, &mut db),
+                            "INCR" => commands::handle_incr(queued_args, &mut db),
+                            "CONFIG" => commands::handle_config(queued_args, &config),
+                            "KEYS" => commands::handle_keys(queued_args, &mut db),
+                            "LPUSH" => commands::handle_lpush(queued_args, &mut db, &notifier),
+                            "RPUSH" => commands::handle_rpush(queued_args, &mut db, &notifier),
+                            "LPOP" => commands::handle_lpop(queued_args, &mut db),
+                            "LLEN" => commands::handle_llen(queued_args, &mut db),
+                            "LRANGE" => commands::handle_lrange(queued_args, &mut db),
+                            _ => encode_error("Unknown command in transaction"),
+                        };
+                        responses.push(response);
+                    }
                     command_queue.clear();
-                    encode_array(&[])
+                    encode_array(&responses)
                 }
             }
             "BLPOP" => {
