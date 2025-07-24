@@ -8,7 +8,6 @@ use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-
 pub fn handle_client(
     mut stream: TcpStream,
     db_arc: Arc<Mutex<InMemoryDB>>,
@@ -50,12 +49,12 @@ pub fn handle_client(
                     encode_error("EXEC without MULTI")
                 } else {
                     in_transaction = false;
-                    let mut responses = Vec::with_capacity(command_queue.len());
+                    let mut response_parts = Vec::with_capacity(command_queue.len());
                     let mut db = db_arc.lock().unwrap();
-                    // Execute each command in the queue
+                    
                     for queued_args in &command_queue {
                         let queued_cmd = queued_args[0].to_uppercase();
-                        let response = match queued_cmd.as_str() {
+                        let response_part = match queued_cmd.as_str() {
                             "PING" => commands::handle_ping(queued_args),
                             "ECHO" => commands::handle_echo(queued_args),
                             "SET" => commands::handle_set(queued_args, &mut db),
@@ -70,10 +69,16 @@ pub fn handle_client(
                             "LRANGE" => commands::handle_lrange(queued_args, &mut db),
                             _ => encode_error("Unknown command in transaction"),
                         };
-                        responses.push(response);
+                        response_parts.push(response_part);
                     }
                     command_queue.clear();
-                    encode_array(&responses)
+                    
+                    // **THE FIX:** Manually build the array from pre-encoded parts.
+                    let mut final_response = format!("*{}\r\n", response_parts.len());
+                    for part in response_parts {
+                        final_response.push_str(&part);
+                    }
+                    final_response
                 }
             }
             "BLPOP" => {
