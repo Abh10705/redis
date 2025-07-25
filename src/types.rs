@@ -1,5 +1,3 @@
-// In src/types.rs
-
 use std::time::Instant;
 
 #[derive(Clone)]
@@ -25,7 +23,6 @@ pub struct ServerState {
     pub master_repl_offset: usize,
 }
 
-// **THE FIX:** This struct was missing.
 pub struct RdbEntry {
     pub value: String,
     pub expiry_ms: Option<u64>,

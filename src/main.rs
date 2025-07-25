@@ -68,7 +68,7 @@ fn main() {
         let replica_port = port;
         thread::spawn(move || {
             if let Ok(mut stream) = TcpStream::connect(addr) {
-                let mut buffer = [0; 512];
+                let mut buffer = [0; 1024];
                 stream
                     .write_all(resp::encode_array(&["PING".to_string()]).as_bytes())
                     .unwrap();

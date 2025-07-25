@@ -16,9 +16,8 @@ impl CommandPropagator {
     }
 
     pub fn propagate(&mut self, command: String) {
-        // We don't want to block the master if a replica is slow,
-        // so we just try to send. If the channel is full, we drop it.
-        // We also remove senders that have been disconnected.
-        self.replicas.retain(|sender| sender.send(command.clone()).is_ok());
+        
+        self.replicas
+            .retain(|sender| sender.send(command.clone()).is_ok());
     }
 }

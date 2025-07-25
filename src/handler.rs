@@ -9,8 +9,6 @@ use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-// In src/handler.rs
-
 pub fn handle_client(
     mut stream: TcpStream,
     db_arc: Arc<Mutex<InMemoryDB>>,
@@ -39,17 +37,24 @@ pub fn handle_client(
 
         let cmd = args[0].to_uppercase();
 
+        // Handle special commands that take over the connection or have unique I/O patterns.
+        // These commands handle their own responses and then skip the main response writer at the end.
         if cmd == "PSYNC" {
             let state = state_arc.lock().unwrap();
             let mut propagator = propagator_arc.lock().unwrap();
             if let Err(e) = commands::handle_psync(&args, &state, &mut stream, &mut propagator) {
                 eprintln!("Error during PSYNC, closing replica connection: {}", e);
             }
+            // This thread is now a dedicated replication handler and its job is done.
             return;
+        } else if cmd == "BLPOP" {
+            let response = commands::handle_blpop(&args, &db_arc, &notifier);
+            stream.write_all(response.as_bytes()).unwrap();
+            continue;
         }
 
+        // All normal commands generate a single response string which is written at the end of the loop.
         let response = match cmd.as_str() {
-            "BLPOP" => commands::handle_blpop(&args, &db_arc, &notifier),
             "MULTI" => {
                 if in_transaction {
                     encode_error("MULTI calls can not be nested")
@@ -147,6 +152,7 @@ pub fn handle_client(
                 }
             }
         };
+
         stream.write_all(response.as_bytes()).unwrap();
     }
 }
