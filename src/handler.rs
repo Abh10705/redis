@@ -1,7 +1,7 @@
-
 use crate::commands;
 use crate::db::InMemoryDB;
 use crate::notifier::Notifier;
+use crate::propagator::CommandPropagator;
 use crate::resp::*;
 use crate::types::{Config, ServerState};
 use std::io::{Read, Write};
@@ -15,6 +15,7 @@ pub fn handle_client(
     config: Arc<Config>,
     notifier: Arc<Mutex<Notifier>>,
     state_arc: Arc<Mutex<ServerState>>,
+    propagator_arc: Arc<Mutex<CommandPropagator>>,
 ) {
     let mut buffer = [0; 512];
     let mut in_transaction = false;
@@ -36,14 +37,15 @@ pub fn handle_client(
 
         let cmd = args[0].to_uppercase();
 
-        // Handle special commands that manage their own I/O first.
         match cmd.as_str() {
             "PSYNC" => {
                 let state = state_arc.lock().unwrap();
-                if let Err(e) = commands::handle_psync(&args, &state, &mut stream) {
+                let mut propagator = propagator_arc.lock().unwrap();
+                if let Err(e) = commands::handle_psync(&args, &state, &mut stream, &mut propagator)
+                {
                     eprintln!("Error handling PSYNC: {}", e);
                 }
-                continue; // Skip the rest of the loop
+                continue;
             }
             "BLPOP" => {
                 let response = if args.len() != 3 {
@@ -62,7 +64,6 @@ pub fn handle_client(
                                 let items = vec![key, element];
                                 break encode_array(&items);
                             }
-
                             if timeout.as_secs_f64() == 0.0 {
                                 let (tx, rx) = mpsc::channel();
                                 notifier.lock().unwrap().add_waiter(key.clone(), tx);
@@ -70,11 +71,9 @@ pub fn handle_client(
                                 let _ = rx.recv();
                                 continue;
                             }
-                            
                             let (tx, rx) = mpsc::channel();
                             notifier.lock().unwrap().add_waiter(key.clone(), tx);
                             drop(db_lock);
-                            
                             match rx.recv_timeout(timeout) {
                                 Ok(_) => continue,
                                 Err(_) => break encode_null_bulk_string(),
@@ -83,12 +82,11 @@ pub fn handle_client(
                     }
                 };
                 stream.write_all(response.as_bytes()).unwrap();
-                continue; // Skip the rest of the loop
+                continue;
             }
-            _ => {} // Fall through for all other commands
+            _ => {}
         }
 
-        // All normal commands generate a single response string.
         let response = match cmd.as_str() {
             "MULTI" => {
                 if in_transaction {
@@ -115,20 +113,20 @@ pub fn handle_client(
                     in_transaction = false;
                     let mut response_parts = Vec::with_capacity(command_queue.len());
                     let mut db = db_arc.lock().unwrap();
-
+                    let mut propagator = propagator_arc.lock().unwrap();
                     for queued_args in &command_queue {
                         let queued_cmd = queued_args[0].to_uppercase();
                         let response_part = match queued_cmd.as_str() {
                             "PING" => commands::handle_ping(queued_args),
                             "ECHO" => commands::handle_echo(queued_args),
-                            "SET" => commands::handle_set(queued_args, &mut db),
+                            "SET" => commands::handle_set(queued_args, &mut db, &mut propagator),
                             "GET" => commands::handle_get(queued_args, &mut db),
-                            "INCR" => commands::handle_incr(queued_args, &mut db),
+                            "INCR" => commands::handle_incr(queued_args, &mut db, &mut propagator),
                             "CONFIG" => commands::handle_config(queued_args, &config),
                             "KEYS" => commands::handle_keys(queued_args, &mut db),
-                            "LPUSH" => commands::handle_lpush(queued_args, &mut db, &notifier),
-                            "RPUSH" => commands::handle_rpush(queued_args, &mut db, &notifier),
-                            "LPOP" => commands::handle_lpop(queued_args, &mut db),
+                            "LPUSH" => commands::handle_lpush(queued_args, &mut db, &notifier, &mut propagator),
+                            "RPUSH" => commands::handle_rpush(queued_args, &mut db, &notifier, &mut propagator),
+                            "LPOP" => commands::handle_lpop(queued_args, &mut db, &mut propagator),
                             "LLEN" => commands::handle_llen(queued_args, &mut db),
                             "LRANGE" => commands::handle_lrange(queued_args, &mut db),
                             _ => encode_error("command not allowed in transaction"),
@@ -136,7 +134,6 @@ pub fn handle_client(
                         response_parts.push(response_part);
                     }
                     command_queue.clear();
-
                     let mut final_response = format!("*{}\r\n", response_parts.len());
                     for part in response_parts {
                         final_response.push_str(&part);
@@ -158,19 +155,20 @@ pub fn handle_client(
                 } else {
                     let mut db = db_arc.lock().unwrap();
                     let state = state_arc.lock().unwrap();
+                    let mut propagator = propagator_arc.lock().unwrap();
                     match cmd.as_str() {
                         "PING" => commands::handle_ping(&args),
                         "ECHO" => commands::handle_echo(&args),
                         "REPLCONF" => commands::handle_replconf(&args),
-                        "SET" => commands::handle_set(&args, &mut db),
+                        "SET" => commands::handle_set(&args, &mut db, &mut propagator),
                         "GET" => commands::handle_get(&args, &mut db),
                         "INFO" => commands::handle_info(&args, &state),
-                        "INCR" => commands::handle_incr(&args, &mut db),
+                        "INCR" => commands::handle_incr(&args, &mut db, &mut propagator),
                         "CONFIG" => commands::handle_config(&args, &config),
                         "KEYS" => commands::handle_keys(&args, &mut db),
-                        "LPUSH" => commands::handle_lpush(&args, &mut db, &notifier),
-                        "RPUSH" => commands::handle_rpush(&args, &mut db, &notifier),
-                        "LPOP" => commands::handle_lpop(&args, &mut db),
+                        "LPUSH" => commands::handle_lpush(&args, &mut db, &notifier, &mut propagator),
+                        "RPUSH" => commands::handle_rpush(&args, &mut db, &notifier, &mut propagator),
+                        "LPOP" => commands::handle_lpop(&args, &mut db, &mut propagator),
                         "LLEN" => commands::handle_llen(&args, &mut db),
                         "LRANGE" => commands::handle_lrange(&args, &mut db),
                         _ => encode_error("Unknown command"),

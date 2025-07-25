@@ -3,6 +3,7 @@ mod db;
 mod handler;
 mod lists;
 mod notifier;
+mod propagator;
 mod rdb;
 mod resp;
 mod types;
@@ -10,6 +11,7 @@ mod types;
 use db::InMemoryDB;
 use handler::handle_client;
 use notifier::Notifier;
+use propagator::CommandPropagator;
 use rdb::load_db_from_rdb;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -31,18 +33,32 @@ fn main() {
         match args[i].as_str() {
             "--port" => {
                 i += 1;
-                if i < args.len() { port = args[i].parse::<u16>().unwrap_or(6379); }
+                if i < args.len() {
+                    port = args[i].parse::<u16>().unwrap_or(6379);
+                }
             }
             "--replicaof" => {
                 role = "slave".to_string();
                 i += 1;
                 if i < args.len() {
                     let parts: Vec<&str> = args[i].split_whitespace().collect();
-                    if parts.len() == 2 { master_addr = Some(format!("{}:{}", parts[0], parts[1])); }
+                    if parts.len() == 2 {
+                        master_addr = Some(format!("{}:{}", parts[0], parts[1]));
+                    }
                 }
             }
-            "--dir" => { i += 1; if i < args.len() { dir = args[i].clone(); } },
-            "--dbfilename" => { i += 1; if i < args.len() { dbfilename = args[i].clone(); } },
+            "--dir" => {
+                i += 1;
+                if i < args.len() {
+                    dir = args[i].clone();
+                }
+            }
+            "--dbfilename" => {
+                i += 1;
+                if i < args.len() {
+                    dbfilename = args[i].clone();
+                }
+            }
             _ => {}
         }
         i += 1;
@@ -53,18 +69,52 @@ fn main() {
         thread::spawn(move || {
             if let Ok(mut stream) = TcpStream::connect(addr) {
                 let mut buffer = [0; 512];
-                stream.write_all(resp::encode_array(&["PING".to_string()]).as_bytes()).unwrap();
+                stream
+                    .write_all(resp::encode_array(&["PING".to_string()]).as_bytes())
+                    .unwrap();
                 stream.read(&mut buffer).unwrap();
-                stream.write_all(resp::encode_array(&["REPLCONF".to_string(), "listening-port".to_string(), replica_port.to_string()]).as_bytes()).unwrap();
+                stream
+                    .write_all(
+                        resp::encode_array(&[
+                            "REPLCONF".to_string(),
+                            "listening-port".to_string(),
+                            replica_port.to_string(),
+                        ])
+                        .as_bytes(),
+                    )
+                    .unwrap();
                 stream.read(&mut buffer).unwrap();
-                stream.write_all(resp::encode_array(&["REPLCONF".to_string(), "capa".to_string(), "psync2".to_string()]).as_bytes()).unwrap();
+                stream
+                    .write_all(
+                        resp::encode_array(&[
+                            "REPLCONF".to_string(),
+                            "capa".to_string(),
+                            "psync2".to_string(),
+                        ])
+                        .as_bytes(),
+                    )
+                    .unwrap();
                 stream.read(&mut buffer).unwrap();
-                stream.write_all(resp::encode_array(&["PSYNC".to_string(), "?".to_string(), "-1".to_string()]).as_bytes()).unwrap();
-            } else { eprintln!("Failed to connect to master."); }
+                stream
+                    .write_all(
+                        resp::encode_array(&[
+                            "PSYNC".to_string(),
+                            "?".to_string(),
+                            "-1".to_string(),
+                        ])
+                        .as_bytes(),
+                    )
+                    .unwrap();
+            } else {
+                eprintln!("Failed to connect to master.");
+            }
         });
     }
 
-    let config = Arc::new(Config { dir: dir.clone(), dbfilename: dbfilename.clone() });
+    let config = Arc::new(Config {
+        dir: dir.clone(),
+        dbfilename: dbfilename.clone(),
+    });
     let server_state = Arc::new(Mutex::new(ServerState {
         role,
         master_replid: "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb".to_string(),
@@ -72,6 +122,7 @@ fn main() {
     }));
     let db_arc = Arc::new(Mutex::new(InMemoryDB::new()));
     let notifier_arc = Arc::new(Mutex::new(Notifier::new()));
+    let propagator_arc = Arc::new(Mutex::new(CommandPropagator::new()));
 
     let rdb_path = Path::new(&dir).join(&dbfilename);
     match load_db_from_rdb(&rdb_path) {
@@ -87,7 +138,10 @@ fn main() {
                 }
             }
         }
-        Err(e) => { eprintln!("Error loading RDB file: {}", e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("Error loading RDB file: {}", e);
+            std::process::exit(1);
+        }
     }
 
     let listener_address = format!("127.0.0.1:{}", port);
@@ -101,11 +155,21 @@ fn main() {
                 let config_clone = Arc::clone(&config);
                 let notifier_clone = Arc::clone(&notifier_arc);
                 let state_clone = Arc::clone(&server_state);
+                let propagator_clone = Arc::clone(&propagator_arc);
                 thread::spawn(move || {
-                    handle_client(stream, db_clone, config_clone, notifier_clone, state_clone)
+                    handle_client(
+                        stream,
+                        db_clone,
+                        config_clone,
+                        notifier_clone,
+                        state_clone,
+                        propagator_clone,
+                    )
                 });
             }
-            Err(e) => { eprintln!("Connection error: {}", e); }
+            Err(e) => {
+                eprintln!("Connection error: {}", e);
+            }
         }
     }
 }
