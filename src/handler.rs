@@ -9,6 +9,8 @@ use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
+// In src/handler.rs
+
 pub fn handle_client(
     mut stream: TcpStream,
     db_arc: Arc<Mutex<InMemoryDB>>,
@@ -17,7 +19,7 @@ pub fn handle_client(
     state_arc: Arc<Mutex<ServerState>>,
     propagator_arc: Arc<Mutex<CommandPropagator>>,
 ) {
-    let mut buffer = [0; 512];
+    let mut buffer = [0; 1024];
     let mut in_transaction = false;
     let mut command_queue: Vec<Vec<String>> = Vec::new();
 
@@ -37,57 +39,17 @@ pub fn handle_client(
 
         let cmd = args[0].to_uppercase();
 
-        match cmd.as_str() {
-            "PSYNC" => {
-                let state = state_arc.lock().unwrap();
-                let mut propagator = propagator_arc.lock().unwrap();
-                if let Err(e) = commands::handle_psync(&args, &state, &mut stream, &mut propagator)
-                {
-                    eprintln!("Error handling PSYNC: {}", e);
-                }
-                continue;
+        if cmd == "PSYNC" {
+            let state = state_arc.lock().unwrap();
+            let mut propagator = propagator_arc.lock().unwrap();
+            if let Err(e) = commands::handle_psync(&args, &state, &mut stream, &mut propagator) {
+                eprintln!("Error during PSYNC, closing replica connection: {}", e);
             }
-            "BLPOP" => {
-                let response = if args.len() != 3 {
-                    encode_error("wrong number of arguments for 'blpop' command")
-                } else {
-                    let key = args[1].clone();
-                    let timeout_res = args[2].parse::<f64>();
-
-                    if timeout_res.is_err() {
-                        encode_error("timeout is not a float or out of range")
-                    } else {
-                        let timeout = Duration::from_secs_f64(timeout_res.unwrap());
-                        loop {
-                            let mut db_lock = db_arc.lock().unwrap();
-                            if let Ok(Some(element)) = db_lock.lpop(&key) {
-                                let items = vec![key, element];
-                                break encode_array(&items);
-                            }
-                            if timeout.as_secs_f64() == 0.0 {
-                                let (tx, rx) = mpsc::channel();
-                                notifier.lock().unwrap().add_waiter(key.clone(), tx);
-                                drop(db_lock);
-                                let _ = rx.recv();
-                                continue;
-                            }
-                            let (tx, rx) = mpsc::channel();
-                            notifier.lock().unwrap().add_waiter(key.clone(), tx);
-                            drop(db_lock);
-                            match rx.recv_timeout(timeout) {
-                                Ok(_) => continue,
-                                Err(_) => break encode_null_bulk_string(),
-                            }
-                        }
-                    }
-                };
-                stream.write_all(response.as_bytes()).unwrap();
-                continue;
-            }
-            _ => {}
+            return;
         }
 
         let response = match cmd.as_str() {
+            "BLPOP" => commands::handle_blpop(&args, &db_arc, &notifier),
             "MULTI" => {
                 if in_transaction {
                     encode_error("MULTI calls can not be nested")
@@ -114,6 +76,7 @@ pub fn handle_client(
                     let mut response_parts = Vec::with_capacity(command_queue.len());
                     let mut db = db_arc.lock().unwrap();
                     let mut propagator = propagator_arc.lock().unwrap();
+
                     for queued_args in &command_queue {
                         let queued_cmd = queued_args[0].to_uppercase();
                         let response_part = match queued_cmd.as_str() {
@@ -124,8 +87,12 @@ pub fn handle_client(
                             "INCR" => commands::handle_incr(queued_args, &mut db, &mut propagator),
                             "CONFIG" => commands::handle_config(queued_args, &config),
                             "KEYS" => commands::handle_keys(queued_args, &mut db),
-                            "LPUSH" => commands::handle_lpush(queued_args, &mut db, &notifier, &mut propagator),
-                            "RPUSH" => commands::handle_rpush(queued_args, &mut db, &notifier, &mut propagator),
+                            "LPUSH" => {
+                                commands::handle_lpush(queued_args, &mut db, &notifier, &mut propagator)
+                            }
+                            "RPUSH" => {
+                                commands::handle_rpush(queued_args, &mut db, &notifier, &mut propagator)
+                            }
                             "LPOP" => commands::handle_lpop(queued_args, &mut db, &mut propagator),
                             "LLEN" => commands::handle_llen(queued_args, &mut db),
                             "LRANGE" => commands::handle_lrange(queued_args, &mut db),
@@ -166,8 +133,12 @@ pub fn handle_client(
                         "INCR" => commands::handle_incr(&args, &mut db, &mut propagator),
                         "CONFIG" => commands::handle_config(&args, &config),
                         "KEYS" => commands::handle_keys(&args, &mut db),
-                        "LPUSH" => commands::handle_lpush(&args, &mut db, &notifier, &mut propagator),
-                        "RPUSH" => commands::handle_rpush(&args, &mut db, &notifier, &mut propagator),
+                        "LPUSH" => {
+                            commands::handle_lpush(&args, &mut db, &notifier, &mut propagator)
+                        }
+                        "RPUSH" => {
+                            commands::handle_rpush(&args, &mut db, &notifier, &mut propagator)
+                        }
                         "LPOP" => commands::handle_lpop(&args, &mut db, &mut propagator),
                         "LLEN" => commands::handle_llen(&args, &mut db),
                         "LRANGE" => commands::handle_lrange(&args, &mut db),
@@ -176,7 +147,6 @@ pub fn handle_client(
                 }
             }
         };
-
         stream.write_all(response.as_bytes()).unwrap();
     }
 }

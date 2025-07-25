@@ -6,7 +6,7 @@ use crate::types::{Config, ServerState};
 use std::io::Write;
 use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
-
+use std::time::Duration;
 
 pub fn handle_ping(_args: &[String]) -> String {
     encode_simple_string("PONG")
@@ -284,5 +284,47 @@ pub fn handle_psync(
     } else {
         stream.write_all(encode_error("PSYNC not supported").as_bytes())?;
         Ok(())
+    }
+}
+
+
+pub fn handle_blpop(
+    args: &[String],
+    db_arc: &Arc<Mutex<InMemoryDB>>,
+    notifier: &Arc<Mutex<Notifier>>,
+) -> String {
+    if args.len() != 3 {
+        return encode_error("wrong number of arguments for 'blpop' command");
+    }
+    let key = args[1].clone();
+    let timeout_res = args[2].parse::<f64>();
+
+    if timeout_res.is_err() {
+        return encode_error("timeout is not a float or out of range");
+    }
+
+    let timeout = Duration::from_secs_f64(timeout_res.unwrap());
+    loop {
+        let mut db_lock = db_arc.lock().unwrap();
+        if let Ok(Some(element)) = db_lock.lpop(&key) {
+            let items = vec![key, element];
+            return encode_array(&items);
+        }
+
+        if timeout.as_secs_f64() == 0.0 {
+            let (tx, rx) = mpsc::channel();
+            notifier.lock().unwrap().add_waiter(key.clone(), tx);
+            drop(db_lock);
+            let _ = rx.recv();
+            continue;
+        }
+
+        let (tx, rx) = mpsc::channel();
+        notifier.lock().unwrap().add_waiter(key.clone(), tx);
+        drop(db_lock);
+        match rx.recv_timeout(timeout) {
+            Ok(_) => continue,
+            Err(_) => return encode_null_bulk_string(),
+        }
     }
 }
