@@ -1,14 +1,9 @@
+use crate::types::RdbEntry;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 
-pub struct RdbEntry {
-    pub value: String,
-    pub expiry_ms: Option<u64>,
-}
-
-// `decode_length` and `decode_string` helpers are unchanged.
 fn decode_length(buf: &[u8]) -> Result<(usize, usize), String> {
     if buf.is_empty() { return Err("Buffer too short".to_string()); }
     let first = buf[0];
@@ -59,15 +54,13 @@ fn decode_string(buf: &[u8]) -> Result<(String, usize), String> {
     }
 }
 
-
 pub fn load_db_from_rdb(path: &Path) -> Result<HashMap<String, RdbEntry>, String> {
     let mut file = match File::open(path) {
         Ok(f) => f,
         Err(_) => return Ok(HashMap::new()),
     };
     let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)
-        .map_err(|_| "Failed to read RDB file")?;
+    file.read_to_end(&mut buffer).map_err(|_| "Failed to read RDB file")?;
 
     if buffer.len() < 10 || &buffer[0..9] != b"REDIS0011" {
         return Err("Invalid RDB file header".to_string());
@@ -99,30 +92,19 @@ pub fn load_db_from_rdb(path: &Path) -> Result<HashMap<String, RdbEntry>, String
                 let (_, expiry_ht_size_skip) = decode_length(&buffer[i..])?;
                 i += expiry_ht_size_skip;
             }
-
-            // **THE FIX IS HERE: Replaced `.expect()` with proper error handling**
             0xFD => {
-                if i + 5 > buffer.len() {
-                    return Err("Invalid RDB: file ends during FD expiry".to_string());
-                }
-                let ts_bytes: [u8; 4] = buffer[i + 1..i + 5]
-                    .try_into()
-                    .map_err(|e| format!("Error parsing FD expiry: {}", e))?;
+                if i + 5 > buffer.len() { return Err("Invalid RDB: file ends during FD expiry".to_string()); }
+                let ts_bytes: [u8; 4] = buffer[i + 1..i + 5].try_into().map_err(|e| format!("Error parsing FD expiry: {}", e))?;
                 let timestamp_s = u32::from_le_bytes(ts_bytes);
                 expiry_ms = Some(timestamp_s as u64 * 1000);
                 i += 5;
             }
             0xFC => {
-                if i + 9 > buffer.len() {
-                    return Err("Invalid RDB: file ends during FC expiry".to_string());
-                }
-                let ts_bytes: [u8; 8] = buffer[i + 1..i + 9]
-                    .try_into()
-                    .map_err(|e| format!("Error parsing FC expiry: {}", e))?;
+                if i + 9 > buffer.len() { return Err("Invalid RDB: file ends during FC expiry".to_string()); }
+                let ts_bytes: [u8; 8] = buffer[i + 1..i + 9].try_into().map_err(|e| format!("Error parsing FC expiry: {}", e))?;
                 expiry_ms = Some(u64::from_le_bytes(ts_bytes));
                 i += 9;
             }
-
             0x00 => {
                 i += 1;
                 let (key, key_bytes_consumed) = decode_string(&buffer[i..])?;
@@ -136,9 +118,7 @@ pub fn load_db_from_rdb(path: &Path) -> Result<HashMap<String, RdbEntry>, String
                 expiry_ms = None;
             }
             0xFF => break,
-            _ => {
-                return Err(format!("Unknown RDB section type: 0x{:02X}", byte));
-            }
+            _ => { return Err(format!("Unknown RDB section type: 0x{:02X}", byte)); }
         }
     }
     Ok(data)

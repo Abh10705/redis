@@ -1,4 +1,4 @@
-//use std::str::Lines;
+// In src/resp.rs
 
 pub fn parse_resp(input: &str) -> Vec<String> {
     let mut parts = vec![];
@@ -13,7 +13,6 @@ pub fn parse_resp(input: &str) -> Vec<String> {
             }
         }
     }
-
     parts
 }
 
@@ -37,12 +36,10 @@ pub fn encode_array(items: &[String]) -> String {
     result
 }
 
-// In src/resp.rs
+pub fn encode_error(msg: &str) -> String {
+    format!("-ERR {}\r\n", msg)
+}
 
 pub fn encode_integer(n: i64) -> String {
     format!(":{}\r\n", n)
-}
-
-pub fn encode_error(msg: &str) -> String {
-    format!("-ERR {}\r\n", msg)
 }

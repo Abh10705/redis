@@ -2,10 +2,10 @@
 use crate::db::InMemoryDB;
 use crate::notifier::Notifier;
 use crate::resp::*;
-use crate::Config;
+use crate::types::{Config, ServerState};
+use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
-use crate::ServerState; 
-// Each function handles one specific command.
+use std::io::{Write};
 
 pub fn handle_ping(_args: &[String]) -> String {
     encode_simple_string("PONG")
@@ -18,7 +18,7 @@ pub fn handle_echo(args: &[String]) -> String {
         encode_bulk_string(&args[1])
     }
 }
-// In src/commands/mod.rs
+
 pub fn handle_get(args: &[String], db: &mut InMemoryDB) -> String {
     if args.len() != 2 {
         encode_error("wrong number of arguments for 'get' command")
@@ -30,6 +30,7 @@ pub fn handle_get(args: &[String], db: &mut InMemoryDB) -> String {
         }
     }
 }
+
 pub fn handle_set(args: &[String], db: &mut InMemoryDB) -> String {
     if args.len() < 3 {
         encode_error("wrong number of arguments for 'set' command")
@@ -154,6 +155,18 @@ pub fn handle_lrange(args: &[String], db: &mut InMemoryDB) -> String {
     }
 }
 
+pub fn handle_info(args: &[String], state: &ServerState) -> String {
+    if args.len() > 1 && args[1].to_lowercase() == "replication" {
+        let info = format!(
+            "role:{}\r\nmaster_replid:{}\r\nmaster_repl_offset:{}",
+            state.role, state.master_replid, state.master_repl_offset
+        );
+        encode_bulk_string(&info)
+    } else {
+        encode_bulk_string("")
+    }
+}
+
 pub fn handle_incr(args: &[String], db: &mut InMemoryDB) -> String {
     if args.len() != 2 {
         encode_error("wrong number of arguments for 'incr' command")
@@ -166,33 +179,33 @@ pub fn handle_incr(args: &[String], db: &mut InMemoryDB) -> String {
     }
 }
 
-pub fn handle_info(args: &[String], state: &ServerState) -> String {
-    if args.len() > 1 && args[1].to_lowercase() == "replication" {
-        // **MODIFIED:** Add the new fields to the response string.
-        let info = format!(
-            "role:{}\r\nmaster_replid:{}\r\nmaster_repl_offset:{}",
-            state.role,
-            state.master_replid,
-            state.master_repl_offset
-        );
-        encode_bulk_string(&info)
-    } else {
-        encode_bulk_string("")
+pub fn handle_replconf(args: &[String]) -> String {
+    if args.len() < 3 {
+        return encode_error("wrong number of arguments for 'replconf' command");
     }
-}
-
-pub fn handle_replconf(_args: &[String]) -> String {
-    // For now, we just need to accept any REPLCONF and reply with OK.
     encode_simple_string("OK")
 }
-// In src/commands/mod.rs
 
-// Add this new function
-pub fn handle_psync(args: &[String], state: &ServerState) -> String {
+pub fn handle_psync(
+    args: &[String],
+    state: &ServerState,
+    stream: &mut TcpStream,
+) -> std::io::Result<()> {
     if args.len() == 3 && args[1] == "?" && args[2] == "-1" {
-        let response = format!("FULLRESYNC {} 0", state.master_replid);
-        encode_simple_string(&response)
+        let response_str = format!("FULLRESYNC {} 0", state.master_replid);
+        let simple_string_response = encode_simple_string(&response_str);
+        stream.write_all(simple_string_response.as_bytes())?;
+
+        let rdb_hex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2283a0400fa0c616f662d707265616d626c65c001ff25343234ff33313936";
+        let rdb_content = hex::decode(rdb_hex).unwrap();
+        let rdb_response = format!("${}\r\n", rdb_content.len());
+
+        stream.write_all(rdb_response.as_bytes())?;
+        stream.write_all(&rdb_content)?;
+
+        Ok(())
     } else {
-        encode_error("PSYNC command not supported in this format")
+        stream.write_all(encode_error("PSYNC command not supported in this format").as_bytes())?;
+        Ok(())
     }
 }
