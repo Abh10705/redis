@@ -19,6 +19,7 @@ pub fn handle_info(args: &[String], state: &ServerState) -> String { if args.len
 pub fn handle_replconf(_args: &[String]) -> String { encode_simple_string("OK") }
 
 pub fn handle_set(args: &[String], db: &mut InMemoryDB) -> String {
+    println!("[DEBUG] Inside handle_set function.");
     if args.len() < 3 {
         return encode_error("wrong number of arguments for 'set' command");
     } else if args.len() >= 5 && args[3].to_uppercase() == "PX" {
