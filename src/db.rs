@@ -1,5 +1,3 @@
-// In src/db.rs
-
 use crate::types::{Entry, RedisValue};
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
