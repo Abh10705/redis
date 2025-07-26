@@ -31,6 +31,7 @@ pub fn handle_get(args: &[String], db: &mut InMemoryDB) -> String {
         }
     }
 }
+
 pub fn handle_set(args: &[String], db: &mut InMemoryDB) -> String {
     if args.len() < 3 {
         return encode_error("wrong number of arguments for 'set' command");
@@ -55,8 +56,7 @@ pub fn handle_config(args: &[String], config: &Arc<Config>) -> String {
     if args.len() < 3 || args[1].to_uppercase() != "GET" {
         encode_error("Only CONFIG GET is supported")
     } else {
-        let key = &args[2];
-        match key.as_str() {
+        match args[2].as_str() {
             "dir" => encode_array(&["dir".to_string(), config.dir.clone()]),
             "dbfilename" => encode_array(&["dbfilename".to_string(), config.dbfilename.clone()]),
             _ => encode_error("Unknown CONFIG key"),
@@ -66,8 +66,7 @@ pub fn handle_config(args: &[String], config: &Arc<Config>) -> String {
 
 pub fn handle_keys(args: &[String], db: &mut InMemoryDB) -> String {
     if args.len() == 2 && args[1] == "*" {
-        let keys = db.keys();
-        encode_array(&keys)
+        encode_array(&db.keys())
     } else {
         encode_error("Only KEYS * is supported")
     }
@@ -118,12 +117,12 @@ pub fn handle_lpop(args: &[String], db: &mut InMemoryDB) -> String {
         }
     }
 }
+
 pub fn handle_llen(args: &[String], db: &mut InMemoryDB) -> String {
     if args.len() != 2 {
         encode_error("wrong number of arguments for 'llen' command")
     } else {
-        let key = &args[1];
-        match db.llen(key) {
+        match db.llen(&args[1]) {
             Ok(list_len) => encode_integer(list_len as i64),
             Err(msg) => encode_error(msg),
         }
@@ -134,16 +133,12 @@ pub fn handle_lrange(args: &[String], db: &mut InMemoryDB) -> String {
     if args.len() != 4 {
         encode_error("wrong number of arguments for 'lrange' command")
     } else {
-        let key = &args[1];
         let start_res = args[2].parse::<isize>();
         let stop_res = args[3].parse::<isize>();
-
         if start_res.is_err() || stop_res.is_err() {
             encode_error("value is not an integer or out of range")
         } else {
-            let start = start_res.unwrap();
-            let stop = stop_res.unwrap();
-            match db.lrange(key, start, stop) {
+            match db.lrange(&args[1], start_res.unwrap(), stop_res.unwrap()) {
                 Ok(elements) => encode_array(&elements),
                 Err(msg) => encode_error(msg),
             }
@@ -173,6 +168,7 @@ pub fn handle_incr(args: &[String], db: &mut InMemoryDB) -> String {
         }
     }
 }
+
 pub fn handle_replconf(_args: &[String]) -> String {
     encode_simple_string("OK")
 }
@@ -236,13 +232,20 @@ pub fn handle_psync(
 
         let (tx, rx) = mpsc::channel::<String>();
         propagator.add_replica(tx);
-        
+
+        println!("Replica registered. Listening for propagated commands.");
         loop {
             match rx.recv() {
                 Ok(command_str) => {
-                    if stream.write_all(command_str.as_bytes()).is_err() { break; }
+                    if stream.write_all(command_str.as_bytes()).is_err() {
+                        eprintln!("Error propagating to replica. Disconnecting.");
+                        break;
+                    }
                 }
-                Err(_) => break,
+                Err(_) => {
+                    eprintln!("Propagator channel disconnected. Replica thread exiting.");
+                    break;
+                }
             }
         }
         Ok(())
