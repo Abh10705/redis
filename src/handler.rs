@@ -149,10 +149,10 @@ pub fn handle_client(
         };
 
         stream.write_all(response.as_bytes()).unwrap();
-
+/* 
         if is_write_cmd && !response.starts_with("-") {
             let mut propagator = propagator_arc.lock().unwrap();
             propagator.propagate(encode_array(&args));
-        }
+        }*/
     }
 }
