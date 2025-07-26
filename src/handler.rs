@@ -7,7 +7,6 @@ use crate::types::{Config, ServerState};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
 
 pub fn handle_client(
     mut stream: TcpStream,
@@ -37,45 +36,38 @@ pub fn handle_client(
 
         let cmd = args[0].to_uppercase();
 
-        // Handle special commands that take over the connection or have unique I/O patterns.
-        // These commands handle their own responses and then skip the main response writer at the end.
         if cmd == "PSYNC" {
             let state = state_arc.lock().unwrap();
             let mut propagator = propagator_arc.lock().unwrap();
             if let Err(e) = commands::handle_psync(&args, &state, &mut stream, &mut propagator) {
                 eprintln!("Error during PSYNC, closing replica connection: {}", e);
             }
-            // This thread is now a dedicated replication handler and its job is done.
             return;
-        } else if cmd == "BLPOP" {
-            let response = commands::handle_blpop(&args, &db_arc, &notifier);
-            stream.write_all(response.as_bytes()).unwrap();
-            continue;
         }
 
-        // All normal commands generate a single response string which is written at the end of the loop.
-        let response = match cmd.as_str() {
+        let (response, is_write_cmd) = match cmd.as_str() {
+            "BLPOP" => (commands::handle_blpop(&args, &db_arc, &notifier), false),
             "MULTI" => {
                 if in_transaction {
-                    encode_error("MULTI calls can not be nested")
+                    (encode_error("MULTI calls can not be nested"), false)
                 } else {
                     in_transaction = true;
                     command_queue.clear();
-                    encode_simple_string("OK")
+                    (encode_simple_string("OK"), false)
                 }
             }
             "DISCARD" => {
                 if !in_transaction {
-                    encode_error("DISCARD without MULTI")
+                    (encode_error("DISCARD without MULTI"), false)
                 } else {
                     in_transaction = false;
                     command_queue.clear();
-                    encode_simple_string("OK")
+                    (encode_simple_string("OK"), false)
                 }
             }
             "EXEC" => {
                 if !in_transaction {
-                    encode_error("EXEC without MULTI")
+                    (encode_error("EXEC without MULTI"), false)
                 } else {
                     in_transaction = false;
                     let mut response_parts = Vec::with_capacity(command_queue.len());
@@ -84,75 +76,79 @@ pub fn handle_client(
 
                     for queued_args in &command_queue {
                         let queued_cmd = queued_args[0].to_uppercase();
-                        let response_part = match queued_cmd.as_str() {
-                            "PING" => commands::handle_ping(queued_args),
-                            "ECHO" => commands::handle_echo(queued_args),
-                            "SET" => commands::handle_set(queued_args, &mut db, &mut propagator),
-                            "GET" => commands::handle_get(queued_args, &mut db),
-                            "INCR" => commands::handle_incr(queued_args, &mut db, &mut propagator),
-                            "CONFIG" => commands::handle_config(queued_args, &config),
-                            "KEYS" => commands::handle_keys(queued_args, &mut db),
-                            "LPUSH" => {
-                                commands::handle_lpush(queued_args, &mut db, &notifier, &mut propagator)
-                            }
-                            "RPUSH" => {
-                                commands::handle_rpush(queued_args, &mut db, &notifier, &mut propagator)
-                            }
-                            "LPOP" => commands::handle_lpop(queued_args, &mut db, &mut propagator),
-                            "LLEN" => commands::handle_llen(queued_args, &mut db),
-                            "LRANGE" => commands::handle_lrange(queued_args, &mut db),
-                            _ => encode_error("command not allowed in transaction"),
+                        let (response_part, is_write) = match queued_cmd.as_str() {
+                            "PING" => (commands::handle_ping(queued_args), false),
+                            "ECHO" => (commands::handle_echo(queued_args), false),
+                            "GET" => (commands::handle_get(queued_args, &mut db), false),
+                            "CONFIG" => (commands::handle_config(queued_args, &config), false),
+                            "KEYS" => (commands::handle_keys(queued_args, &mut db), false),
+                            "LLEN" => (commands::handle_llen(queued_args, &mut db), false),
+                            "LRANGE" => (commands::handle_lrange(queued_args, &mut db), false),
+                            "SET" => (commands::handle_set(queued_args, &mut db), true),
+                            "INCR" => (commands::handle_incr(queued_args, &mut db), true),
+                            "LPUSH" => (commands::handle_lpush(queued_args, &mut db, &notifier), true),
+                            "RPUSH" => (commands::handle_rpush(queued_args, &mut db, &notifier), true),
+                            "LPOP" => (commands::handle_lpop(queued_args, &mut db), true),
+                            _ => (encode_error("command not allowed in transaction"), false),
                         };
+                        
+                        if is_write && !response_part.starts_with("-") {
+                             propagator.propagate(encode_array(queued_args));
+                        }
                         response_parts.push(response_part);
                     }
                     command_queue.clear();
+                    
                     let mut final_response = format!("*{}\r\n", response_parts.len());
                     for part in response_parts {
                         final_response.push_str(&part);
                     }
-                    final_response
+                    (final_response, false)
                 }
             }
             _ => {
                 if in_transaction {
                     match cmd.as_str() {
-                        "MULTI" | "EXEC" | "DISCARD" => {
-                            encode_error(&format!("{} command not allowed in transaction", cmd))
-                        }
+                        "MULTI" | "EXEC" | "DISCARD" => (
+                            encode_error(&format!("{} command not allowed in transaction", cmd)),
+                            false,
+                        ),
                         _ => {
-                            command_queue.push(args);
-                            encode_simple_string("QUEUED")
+                            command_queue.push(args.clone());
+                            (encode_simple_string("QUEUED"), false)
                         }
                     }
                 } else {
                     let mut db = db_arc.lock().unwrap();
                     let state = state_arc.lock().unwrap();
-                    let mut propagator = propagator_arc.lock().unwrap();
-                    match cmd.as_str() {
-                        "PING" => commands::handle_ping(&args),
-                        "ECHO" => commands::handle_echo(&args),
-                        "REPLCONF" => commands::handle_replconf(&args),
-                        "SET" => commands::handle_set(&args, &mut db, &mut propagator),
-                        "GET" => commands::handle_get(&args, &mut db),
-                        "INFO" => commands::handle_info(&args, &state),
-                        "INCR" => commands::handle_incr(&args, &mut db, &mut propagator),
-                        "CONFIG" => commands::handle_config(&args, &config),
-                        "KEYS" => commands::handle_keys(&args, &mut db),
-                        "LPUSH" => {
-                            commands::handle_lpush(&args, &mut db, &notifier, &mut propagator)
-                        }
-                        "RPUSH" => {
-                            commands::handle_rpush(&args, &mut db, &notifier, &mut propagator)
-                        }
-                        "LPOP" => commands::handle_lpop(&args, &mut db, &mut propagator),
-                        "LLEN" => commands::handle_llen(&args, &mut db),
-                        "LRANGE" => commands::handle_lrange(&args, &mut db),
-                        _ => encode_error("Unknown command"),
-                    }
+                    
+                    let (resp, is_write) = match cmd.as_str() {
+                        "PING" => (commands::handle_ping(&args), false),
+                        "ECHO" => (commands::handle_echo(&args), false),
+                        "REPLCONF" => (commands::handle_replconf(&args), false),
+                        "GET" => (commands::handle_get(&args, &mut db), false),
+                        "INFO" => (commands::handle_info(&args, &state), false),
+                        "CONFIG" => (commands::handle_config(&args, &config), false),
+                        "KEYS" => (commands::handle_keys(&args, &mut db), false),
+                        "LLEN" => (commands::handle_llen(&args, &mut db), false),
+                        "LRANGE" => (commands::handle_lrange(&args, &mut db), false),
+                        "SET" => (commands::handle_set(&args, &mut db), true),
+                        "INCR" => (commands::handle_incr(&args, &mut db), true),
+                        "LPUSH" => (commands::handle_lpush(&args, &mut db, &notifier), true),
+                        "RPUSH" => (commands::handle_rpush(&args, &mut db, &notifier), true),
+                        "LPOP" => (commands::handle_lpop(&args, &mut db), true),
+                        _ => (encode_error("Unknown command"), false),
+                    };
+                    (resp, is_write)
                 }
             }
         };
 
         stream.write_all(response.as_bytes()).unwrap();
+
+        if is_write_cmd && !response.starts_with("-") {
+            let mut propagator = propagator_arc.lock().unwrap();
+            propagator.propagate(encode_array(&args));
+        }
     }
 }
