@@ -8,8 +8,6 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
 
-// In src/handler.rs
-
 pub fn handle_client(
     mut stream: TcpStream,
     db_arc: Arc<Mutex<InMemoryDB>>,
@@ -48,57 +46,40 @@ pub fn handle_client(
                 if !in_transaction { (encode_error("DISCARD without MULTI"), false) } 
                 else { in_transaction = false; command_queue.clear(); (encode_simple_string("OK"), false) }
             },
-            // In src/handler.rs
-
             "EXEC" => {
                 if !in_transaction {
                     (encode_error("EXEC without MULTI"), false)
                 } else {
                     in_transaction = false;
                     let mut response_parts = Vec::with_capacity(command_queue.len());
-                    let mut commands_to_propagate = Vec::new();
+                    let mut db = db_arc.lock().unwrap();
+                    let mut propagator = propagator_arc.lock().unwrap();
 
-                    // Phase 1: Execute commands and collect responses/commands for propagation
-                    {
-                        let mut db = db_arc.lock().unwrap();
-                        for queued_args in &command_queue {
-                            let queued_cmd = queued_args[0].to_uppercase();
-                            let (response_part, is_write) = match queued_cmd.as_str() {
-                                "PING" => (commands::handle_ping(queued_args), false),
-                                "ECHO" => (commands::handle_echo(queued_args), false),
-                                "GET" => (commands::handle_get(queued_args, &mut db), false),
-                                "LLEN" => (commands::handle_llen(queued_args, &mut db), false),
-                                "LRANGE" => (commands::handle_lrange(queued_args, &mut db), false),
-                                "SET" => (commands::handle_set(queued_args, &mut db), true),
-                                "INCR" => (commands::handle_incr(queued_args, &mut db), true),
-                                "LPUSH" => (commands::handle_lpush(queued_args, &mut db, &notifier), true),
-                                "RPUSH" => (commands::handle_rpush(queued_args, &mut db, &notifier), true),
-                                "LPOP" => (commands::handle_lpop(queued_args, &mut db), true),
-                                _ => (encode_error("command not allowed in transaction"), false),
-                            };
-                            
-                            if is_write && !response_part.starts_with("-") {
-                                 commands_to_propagate.push(encode_array(queued_args));
-                            }
-                            response_parts.push(response_part);
+                    for queued_args in &command_queue {
+                        let queued_cmd = queued_args[0].to_uppercase();
+                        let (response_part, is_write) = match queued_cmd.as_str() {
+                            "SET" => (commands::handle_set(queued_args, &mut db), true),
+                            "INCR" => (commands::handle_incr(queued_args, &mut db), true),
+                            "LPUSH" => (commands::handle_lpush(queued_args, &mut db, &notifier), true),
+                            "RPUSH" => (commands::handle_rpush(queued_args, &mut db, &notifier), true),
+                            "LPOP" => (commands::handle_lpop(queued_args, &mut db), true),
+                            "PING" => (commands::handle_ping(queued_args), false),
+                            "ECHO" => (commands::handle_echo(queued_args), false),
+                            "GET" => (commands::handle_get(queued_args, &mut db), false),
+                            "LLEN" => (commands::handle_llen(queued_args, &mut db), false),
+                            "LRANGE" => (commands::handle_lrange(queued_args, &mut db), false),
+                            _ => (encode_error("command not allowed in transaction"), false),
+                        };
+                        
+                        if is_write && !response_part.starts_with("-") {
+                             propagator.propagate(encode_array(queued_args));
                         }
-                    } // The database lock is released here
-
-                    // Phase 2: Propagate commands
-                    if !commands_to_propagate.is_empty() {
-                        let mut propagator = propagator_arc.lock().unwrap();
-                        for command_str in commands_to_propagate {
-                            propagator.propagate(command_str);
-                        }
+                        response_parts.push(response_part);
                     }
-                    
                     command_queue.clear();
                     
-                    // Phase 3: Format the final response
                     let mut final_response = format!("*{}\r\n", response_parts.len());
-                    for part in response_parts {
-                        final_response.push_str(&part);
-                    }
+                    for part in response_parts { final_response.push_str(&part); }
                     (final_response, false)
                 }
             },
@@ -113,7 +94,6 @@ pub fn handle_client(
                     let state = state_arc.lock().unwrap();
                     
                     let (resp, is_write) = match cmd.as_str() {
-                        // Read Commands
                         "PING" | "ECHO" | "REPLCONF" | "GET" | "INFO" | "CONFIG" | "KEYS" | "LLEN" | "LRANGE" => {
                             let r = match cmd.as_str() {
                                 "PING" => commands::handle_ping(&args),
@@ -129,7 +109,6 @@ pub fn handle_client(
                             };
                             (r, false)
                         },
-                        // Write Commands
                         "SET" | "INCR" | "LPUSH" | "RPUSH" | "LPOP" => {
                              let r = match cmd.as_str() {
                                 "SET" => commands::handle_set(&args, &mut db),
@@ -149,10 +128,10 @@ pub fn handle_client(
         };
 
         stream.write_all(response.as_bytes()).unwrap();
-/* 
+
         if is_write_cmd && !response.starts_with("-") {
             let mut propagator = propagator_arc.lock().unwrap();
             propagator.propagate(encode_array(&args));
-        }*/
+        }
     }
 }
