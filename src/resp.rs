@@ -1,5 +1,3 @@
-// In src/resp.rs
-
 pub fn parse_resp(input: &str) -> Vec<String> {
     let mut parts = vec![];
     let mut lines = input.lines();

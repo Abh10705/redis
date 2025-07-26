@@ -16,7 +16,7 @@ impl CommandPropagator {
     }
 
     pub fn propagate(&mut self, command: String) {
-        
+        // We remove any replicas that have disconnected by checking if the send is successful.
         self.replicas
             .retain(|sender| sender.send(command.clone()).is_ok());
     }

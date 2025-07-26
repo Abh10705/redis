@@ -1,4 +1,3 @@
-
 use crate::db::InMemoryDB;
 use crate::notifier::Notifier;
 use crate::types::{Entry, RedisValue};
@@ -49,7 +48,7 @@ impl InMemoryDB {
             Err("WRONGTYPE Operation against a key holding the wrong kind of value")
         }
     }
-
+    
     pub fn lpop(&mut self, key: &str) -> Result<Option<String>, &'static str> {
         if let Some(entry) = self.map.get_mut(key) {
             if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
@@ -74,7 +73,7 @@ impl InMemoryDB {
             Ok(None)
         }
     }
-
+    
     pub fn lpop_count(&mut self, key: &str, count: usize) -> Result<Vec<String>, &'static str> {
         if let Some(entry) = self.map.get_mut(key) {
             if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
@@ -85,7 +84,7 @@ impl InMemoryDB {
             if let RedisValue::List(list) = &mut entry.value {
                 let num_to_pop = std::cmp::min(count, list.len());
                 let popped_elements: Vec<String> = list.drain(0..num_to_pop).collect();
-
+                
                 if list.is_empty() {
                     self.map.remove(key);
                 }
@@ -97,7 +96,7 @@ impl InMemoryDB {
             Ok(vec![])
         }
     }
-
+    
     pub fn llen(&mut self, key: &str) -> Result<usize, &'static str> {
         if let Some(entry) = self.map.get_mut(key) {
             if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
@@ -113,7 +112,7 @@ impl InMemoryDB {
             Ok(0)
         }
     }
-
+    
     pub fn lrange(&mut self, key: &str, start: isize, stop: isize) -> Result<Vec<String>, &'static str> {
         if let Some(entry) = self.map.get_mut(key) {
             if entry.expires_at.map_or(false, |e| e <= Instant::now()) {
@@ -125,7 +124,7 @@ impl InMemoryDB {
                 let len = list.len() as isize;
                 let mut start = if start < 0 { len + start } else { start };
                 let mut stop = if stop < 0 { len + stop } else { stop };
-
+                
                 start = std::cmp::max(0, start);
                 stop = std::cmp::max(0, stop);
 
@@ -135,6 +134,7 @@ impl InMemoryDB {
 
                 let end = std::cmp::min(stop as usize, list.len() - 1);
                 Ok(list[start as usize..=end].to_vec())
+
             } else {
                 Err("WRONGTYPE Operation against a key holding the wrong kind of value")
             }
