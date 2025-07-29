@@ -1,4 +1,4 @@
-#Rust Redis Clone
+Rust Redis Clone
 A high-performance, multi-threaded Redis clone written in Rust, focusing on core Redis features including data structures, persistence, transactions, and replication.
 
 This project is an implementation of some of the most essential Redis functionalities, built from the ground up to understand the core architecture of an in-memory data store.
