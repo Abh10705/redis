@@ -1,34 +1,30 @@
-[![progress-banner](https://backend.codecrafters.io/progress/redis/c2049574-e413-4c5e-9421-5293d6cf2310)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+#Rust Redis Clone
+A high-performance, multi-threaded Redis clone written in Rust, focusing on core Redis features including data structures, persistence, transactions, and replication.
 
-This is a starting point for Rust solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+This project is an implementation of some of the most essential Redis functionalities, built from the ground up to understand the core architecture of an in-memory data store.
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+Features Implemented
+Core Commands: PING, ECHO
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+String Operations: SET, GET, INCR (with expiry PX)
 
-# Passing the first stage
+List Operations: LPUSH, RPUSH, LPOP, LLEN, LRANGE (with negative indexes)
 
-The entry point for your Redis implementation is in `src/main.rs`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+Blocking Operations: BLPOP with timeout support
 
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
-```
+Server Commands: INFO replication, CONFIG GET
 
-That's all!
+Transactions: Full MULTI, EXEC, DISCARD support with command queuing.
 
-# Stage 2 & beyond
+Persistence: Loads database state from an .rdb file on startup.
 
-Note: This section is for stages 2 and beyond.
+Replication:
 
-1. Ensure you have `cargo (1.88)` installed locally
-1. Run `./your_program.sh` to run your Redis server, which is implemented in
-   `src/main.rs`. This command compiles your Rust project, so it might be slow
-   the first time you run it. Subsequent runs will be fast.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+Can be started as a master or a replica.
+
+Performs the full replication handshake (PING, REPLCONF, PSYNC).
+
+Master propagates write commands to all connected replicas.
+
+Fully multi-threaded, with each client connection handled in isolation. Shared state is managed safely with Arc<Mutex<T>>.
+
